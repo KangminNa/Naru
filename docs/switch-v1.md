@@ -129,7 +129,10 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<관리 주소>/login
 sudo docker stop shelf && sudo docker compose start                 # 다시 v2로
 ```
 
-v2는 마지막 설정과 받아 둔 인증서로 바로 이어서 뜬다. 서버가 재부팅돼도 멈춰 둔 `shelf`는 다시 뜨지 않는다 (`sudo docker stop`한 컨테이너는
+v2는 마지막 설정과 받아 둔 인증서로 바로 이어서 뜬다.
+
+v1은 켜질 때마다 내장 사이트를 앱 "landing"으로 등록하고 컨테이너 `shelf-landing`을 만든다 (v1 자신의 동작).
+v2는 이 앱을 모른다 — 되돌리기 리허설이 끝나면 이름으로 지운다: `sudo docker rm -f shelf-landing`. 서버가 재부팅돼도 멈춰 둔 `shelf`는 다시 뜨지 않는다 (`sudo docker stop`한 컨테이너는
 `unless-stopped`여도 멈춘 채로 있다) — v1 폴더에서 `sudo docker compose up`을 하지 않는 한 80/443을 다투지 않는다.
 
 ## 되돌리기 — 실제로 필요할 때

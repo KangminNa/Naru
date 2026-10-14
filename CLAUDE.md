@@ -9,9 +9,9 @@ plus push-to-deploy. Written in Go; the admin screen is server-rendered HTML (`h
 
 | Doc | Question it answers |
 |---|---|
-| [docs/design/v2-objects.md](docs/design/v2-objects.md) | **Who does what** — behaviors A–H, one object per job, every interface (§6 is `contract.go` verbatim), who uses what (§7), rules R1–R11 (§10), how to work (§11) |
+| [docs/design/v2-objects.md](docs/design/v2-objects.md) | **Who does what** — behaviors A–K, one object per job, every interface (§6 is `contract.go` verbatim), who uses what (§7), rules R1–R12 (§10), how to work (§11) |
 | [docs/design/v2.md](docs/design/v2.md) | **What and when** — features, screens, milestones M1–M7, progress log |
-| [docs/design/caddy-engine.md](docs/design/caddy-engine.md) | **Invariants** for driving Caddy (§4) and certificates (§5). The rest is v1-era |
+| [docs/design/caddy-engine.md](docs/design/caddy-engine.md) | **Invariants** for driving Caddy (§1, numbered 1–6 — code comments cite them) and how certificates work (§2) |
 
 ## How we work
 
@@ -19,10 +19,10 @@ Any change that needs a decision starts with a **design note** (which behavior, 
 changed §7 rows, invariants, pattern and why, alternatives not taken) → user approval → tests against the interface
 with fakes → implementation → `archtest` + update `v2-objects.md`. Bug fixes that don't change an interface skip the note.
 
-`internal/archtest` enforces R1–R11 (imports only `model`/`contract`, relations via interfaces, `model` is data only,
+`internal/archtest` enforces R1–R12 (imports only `model`/`contract`, relations via interfaces, `model` is data only,
 ≤5 methods per interface, every `model`/`contract` type named in the design doc, no vague names like
 Handler/Data/Info/Util, SQL only in `store`, outside world only in tool packages, kind branching only in `kinds`,
-no secrets in `web`/`cli`, regexp only in `model`). A failure there is a design violation, not a test to loosen.
+no secrets in `web`/`cli`, regexp only in `model`, environment config read only in `app`/`cmd`). A failure there is a design violation, not a test to loosen.
 
 ## Structure
 
@@ -31,12 +31,12 @@ cmd/naru/            main — server, or a shell recovery command (users | passw
 internal/
 ├── model/           data and value objects (Parse… validates once) — no behavior beyond keeping values valid
 ├── contract/        every interface between objects
-├── access settings services kinds deploy webhook webserver views   ← one package per behavior (§4 A–H)
+├── access settings services kinds deploy webhook webserver views websettings watch notify   ← one package per behavior (§4 A–K)
 ├── web/ cli/        entry points: turn requests into interface calls, results into screens
 ├── store/           SQLite (the only SQL) incl. v1 import
-├── docker git files caddy netcheck stats events system           ← tools that touch the outside world
+├── docker git files caddy netcheck stats events system httppost  ← tools that touch the outside world
 ├── app/             composition root — the only place concrete types meet (§7 table as code)
-└── archtest/        R1–R11
+└── archtest/        R1–R12
 caddy/bootstrap.json Caddy's first config (admin socket only); Naru pushes the full config over the socket
 deploy/docker/       production compose (Docker install) + rehearsal.yml (shadow run on loopback ports)
 deploy/host/         systemd units for the host install
@@ -52,11 +52,13 @@ scripts/go.sh vet ./...
 scripts/go.sh test ./...
 scripts/go.sh test ./internal/caddy -update   # rewrite Caddy config goldens after an intended change
 scripts/caddy-validate.sh                     # goldens must pass real `caddy validate`
-docker compose up -d --build                  # local stack: Caddy on 127.0.0.1:8088/8443, Naru on 127.0.0.1:8080
+docker compose up -d --build                  # local dev stack (project naru-dev): Caddy on 127.0.0.1:8088/8443, Naru on 127.0.0.1:8080
 docker compose logs naru | grep setup         # first-run setup link (token printed only in the log)
 ```
 
 Local stack data lives in `data-v2/` (gitignored). Use a copy of real data, never the production server.
+The root `compose.yml` is **dev only** (project `naru-dev`, needs `docker network create naru-net` once). Production runs from
+`deploy/docker/` (project `naru`) — on 2026-10-14 the dev file was run on the server, shared the project name, and replaced production.
 
 ## Security rules (do not regress)
 

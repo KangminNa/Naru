@@ -1,7 +1,13 @@
-# 로컬에서 띄워 보는 구성 — 포트는 127.0.0.1에만, 인증서는 내부 CA. 운영 구성은 M7(실서버 전환)에서 정한다.
+# 로컬 개발용 구성 — 포트는 127.0.0.1에만, 인증서는 내부 CA, 데이터는 data-v2.
+# ⚠ 운영 서버에서 쓰지 않는다. 운영은 deploy/docker/compose.yml (그 폴더에서 docker compose).
+#   프로젝트 이름을 naru-dev로 따로 둔다 — 운영(naru)과 같으면 서버에서 실수로 돌렸을 때 운영 컨테이너를 덮어쓴다 (2026-10-14 실제로 겪음).
+#   이제는 같은 컨테이너 이름이 이미 있으면 만들지 못하고 멈춘다.
+#   docker network create naru-net               ← 처음 한 번
 #   docker compose up -d --build
 #   docker compose logs naru | grep setup                  ← 첫 설정 주소
 #   http://localhost:8088/setup?token=...                    ← 웹서버(Caddy)를 거쳐 들어간다
+name: naru-dev
+
 services:
   # 웹서버 엔진. 설정은 Naru가 관리 소켓으로 통째로 밀어넣는다 — 이 컨테이너에 설정 파일을 두지 않는다.
   caddy:
@@ -46,7 +52,8 @@ services:
 volumes:
   caddy-admin:
 
-# 앱 컨테이너와 웹서버가 함께 있는 네트워크. v1 서버에서 옮길 때는 NARU_NETWORK=shelf-net
+# 앱 컨테이너와 웹서버가 함께 있는 네트워크 — 미리 만들어 둔다 (운영 구성과 같은 방식)
 networks:
   apps:
     name: ${NARU_NETWORK:-naru-net}
+    external: true

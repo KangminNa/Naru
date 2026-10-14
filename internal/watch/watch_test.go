@@ -139,11 +139,11 @@ func name(s string) model.ServiceName { n, _ := model.ParseServiceName(s); retur
 func newRig() *rig {
 	r := &rig{
 		services: &fakeServices{all: []model.Service{
-			{ID: 1, Name: name("blog"), Kind: model.KindImage, Port: 80, Live: model.LiveState{Alias: "naru-blog", Instance: "naru-blog-3", InstanceIP: "10.0.0.3"}},
+			{ID: 1, Name: name("blog"), Kind: model.KindImage, Port: 80, Live: model.LiveState{Alias: "naru-blog", Instance: "naru-blog-3"}},
 			{ID: 2, Name: name("site"), Kind: model.KindStatic, Live: model.LiveState{Release: "4"}},
 			{ID: 3, Name: name("nas"), Kind: model.KindExternal, External: "192.168.0.20:5000"},
 		}},
-		containers: &fakeContainers{states: model.ContainerStates{"naru-blog-3": {Name: "naru-blog-3", Running: true, State: "running", IP: "10.0.0.3"}}},
+		containers: &fakeContainers{states: model.ContainerStates{"naru-blog-3": {Name: "naru-blog-3", Running: true, State: "running"}}},
 		ports:      &fakePorts{deaf: map[string]bool{}, only: map[string]model.Port{}},
 		deployer:   &fakeDeployer{busy: map[model.ServiceID]bool{}},
 		web:        &fakeWebServer{up: true},
@@ -225,7 +225,7 @@ func TestWhatWasDownAtStartIsNotAlerted(t *testing.T) {
 func TestRunningButNotAnsweringIsDown(t *testing.T) {
 	r := newRig()
 	r.check()
-	r.ports.deaf["10.0.0.3"] = true
+	r.ports.deaf["naru-blog-3"] = true
 	r.check()
 	ev := r.check()
 	if len(ev) != 1 || ev[0].(model.ServiceDown).Why != "noanswer" {
@@ -339,7 +339,7 @@ func TestUsageOfRunningContainerServices(t *testing.T) {
 		t.Fatal("a stopped container has no usage")
 	}
 
-	r.containers.states["naru-blog-3"] = model.ContainerState{Name: "naru-blog-3", Running: true, State: "running", IP: "10.0.0.3"}
+	r.containers.states["naru-blog-3"] = model.ContainerState{Name: "naru-blog-3", Running: true, State: "running"}
 	r.usage.fails["naru-blog-3"] = true
 	r.check()
 	if len(r.w.Snapshot().Usage) != 0 {

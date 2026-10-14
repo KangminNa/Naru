@@ -108,9 +108,9 @@ func TestDemuxStripsFrameHeaders(t *testing.T) {
 	}
 }
 
-// 설치형에서는 compose가 네트워크를 만들어 주지 않는다 — 처음 띄울 때 없으면 만든다.
+// 앱 네트워크가 없으면 처음 띄울 때 만든다 (compose는 external 네트워크를 만들어 주지 않는다).
 // 실제 dockerd(27)는 없는 네트워크로도 create를 받고 start에서야 실패한다 — 그래서 먼저 확인한다.
-func TestStartCreatesTheNetworkAndReturnsTheIP(t *testing.T) {
+func TestStartCreatesTheNetwork(t *testing.T) {
 	var calls []string
 	networkExists := false
 	sock := fakeDocker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -137,30 +137,17 @@ func TestStartCreatesTheNetworkAndReturnsTheIP(t *testing.T) {
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
-		case r.URL.Path == "/containers/naru-x-1/json":
-			w.Write([]byte(`{"State":{"Running":true,"Status":"running"},"NetworkSettings":{"Networks":{"naru-net":{"IPAddress":"172.18.0.5"},"other":{"IPAddress":"10.1.1.1"}}}}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
-	c := NewContainers(New(sock), "naru-net")
+	c := NewContainers(New(sock))
 	spec := model.ContainerSpec{Name: "naru-x-1", Image: "img", Network: "naru-net", Aliases: []string{"naru-x"}}
-	ip, err := c.Start(context.Background(), spec)
-	if err != nil || ip != "172.18.0.5" {
-		t.Fatalf("ip=%q err=%v calls=%v", ip, err, calls)
+	if err := c.Start(context.Background(), spec); err != nil {
+		t.Fatalf("err=%v calls=%v", err, calls)
 	}
 	if strings.Count(strings.Join(calls, " "), "/networks/create") != 1 {
 		t.Fatalf("the network is created once: %v", calls)
-	}
-}
-
-func TestStatesCarryTheIPOnTheAppNetwork(t *testing.T) {
-	sock := fakeDocker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`[{"Names":["/naru-x-1"],"State":"running","Status":"Up","NetworkSettings":{"Networks":{"bridge":{"IPAddress":"172.17.0.2"},"naru-net":{"IPAddress":"172.18.0.5"}}}}]`))
-	}))
-	all, err := NewContainers(New(sock), "naru-net").All(context.Background())
-	if err != nil || all["naru-x-1"].IP != "172.18.0.5" {
-		t.Fatalf("%+v %v", all, err)
 	}
 }
 
@@ -177,7 +164,7 @@ func TestRecentLogsKeepTimeAndStream(t *testing.T) {
 		body := append(mux(1, "2026-10-10T12:00:01.500000000Z listening on :80\n"), mux(2, "2026-10-10T12:00:02.000000000Z warn: slow\n2026-10-10T12:00:03.000000000Z second line\n")...)
 		w.Write(body)
 	}))
-	lines, err := NewContainers(New(sock), "naru-net").Recent(context.Background(), "naru-x-1", 50)
+	lines, err := NewContainers(New(sock)).Recent(context.Background(), "naru-x-1", 50)
 	if err != nil || len(lines) != 3 {
 		t.Fatalf("%+v %v", lines, err)
 	}
@@ -202,7 +189,7 @@ func TestUsage(t *testing.T) {
 			"precpu_stats":{"cpu_usage":{"total_usage":3000000000},"system_cpu_usage":116000000000},
 			"memory_stats":{"usage":157286400,"limit":8238469120,"stats":{"inactive_file":52428800}}}`))
 	}))
-	u, err := NewContainers(New(sock), "naru-net").Usage(context.Background(), "naru-blog-1")
+	u, err := NewContainers(New(sock)).Usage(context.Background(), "naru-blog-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +199,7 @@ func TestUsage(t *testing.T) {
 	if u.MemUsed != 104857600 || u.MemLimit != 8238469120 {
 		t.Fatalf("file cache is not counted as used: %+v", u)
 	}
-	if _, err := NewContainers(New(sock), "naru-net").Usage(context.Background(), "nope"); err == nil {
+	if _, err := NewContainers(New(sock)).Usage(context.Background(), "nope"); err == nil {
 		t.Fatal("unknown container")
 	}
 }

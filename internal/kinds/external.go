@@ -1,32 +1,13 @@
 package kinds
 
-import (
-	"strings"
-
-	"github.com/KangminNa/naru/internal/model"
-)
-
-// thisServer는 저장된 주소에서 "이 서버"를 뜻하는 이름이다 (localhost를 적으면 이것으로 저장된다).
-const thisServer = "host.docker.internal"
+import "github.com/KangminNa/naru/internal/model"
 
 // ExternalDestination은 적어 둔 주소다 (https://로 시작하면 TLS로 보낸다).
-// ThisServer가 있으면 "이 서버"를 그 주소로 바꿔 그린다 — 설치형은 127.0.0.1. 저장된 값은 그대로 둔다.
-type ExternalDestination struct{ ThisServer string }
+// "이 서버"(localhost)는 저장할 때 이미 host.docker.internal로 바뀌어 있다 — 웹서버 컨테이너에서 본 호스트다.
+type ExternalDestination struct{}
 
-func (e ExternalDestination) Find(s model.Service) model.Destination {
-	addr := s.External
-	if e.ThisServer != "" {
-		scheme, rest, ok := strings.Cut(addr, "://")
-		if !ok {
-			scheme, rest = "", addr
-		} else {
-			scheme += "://"
-		}
-		if host, port, found := strings.Cut(rest, ":"); found && host == thisServer {
-			addr = scheme + e.ThisServer + ":" + port
-		}
-	}
-	return model.Destination{Address: addr}
+func (ExternalDestination) Find(s model.Service) model.Destination {
+	return model.Destination{Address: s.External}
 }
 
 // ExternalStatus는 언제나 "연결만 함"이다 — Naru가 띄우는 것이 아니다.

@@ -57,15 +57,14 @@ type fakeDocker struct {
 	states  model.ContainerStates
 	down    bool
 	hold    chan struct{}
-	listens map[string]model.Port // 주소마다 앱이 실제로 듣는 포트 (없으면 어느 포트든 응답)
+	listens map[string]model.Port // 컨테이너마다 앱이 실제로 듣는 포트 (없으면 어느 포트든 응답)
 }
 
-func (d *fakeDocker) Start(_ context.Context, s model.ContainerSpec) (string, error) {
+func (d *fakeDocker) Start(_ context.Context, s model.ContainerSpec) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	ip := fmt.Sprintf("172.30.0.%d", len(d.states)+10)
-	d.states[s.Name] = model.ContainerState{Name: s.Name, Running: true, State: "running", Status: "Up 1 second", IP: ip}
-	return ip, nil
+	d.states[s.Name] = model.ContainerState{Name: s.Name, Running: true, State: "running", Status: "Up 1 second"}
+	return nil
 }
 
 func (d *fakeDocker) Remove(_ context.Context, name string) error {
@@ -241,21 +240,18 @@ type harness struct {
 	certs  *fakeCerts
 }
 
-// newHarness는 Naru를 통째로 띄운다 (Docker 방식). DNS는 naru.example.com → 198.51.100.24 로 고정한다.
-func newHarness(t *testing.T, envDomain string) *harness { return newHarnessIn(t, envDomain, "docker") }
-
-// newHarnessIn은 설치 방식을 골라 띄운다 — "docker" 또는 "host".
-func newHarnessIn(t *testing.T, envDomain, install string) *harness {
-	return newHarnessWith(t, harnessOpts{envDomain: envDomain, install: install})
+// newHarness는 Naru를 통째로 띄운다. DNS는 naru.example.com → 198.51.100.24 로 고정한다.
+func newHarness(t *testing.T, envDomain string) *harness {
+	return newHarnessWith(t, harnessOpts{envDomain: envDomain})
 }
 
 type harnessOpts struct {
-	envDomain, install string
-	watchEvery         time.Duration // 0이 아니면 지켜보기 고리를 이 간격으로 돌린다
+	envDomain  string
+	watchEvery time.Duration // 0이 아니면 지켜보기 고리를 이 간격으로 돌린다
 }
 
 func newHarnessWith(t *testing.T, o harnessOpts) *harness {
-	envDomain, install := o.envDomain, o.install
+	envDomain := o.envDomain
 	t.Helper()
 	lookup := func(_ context.Context, host string) ([]string, error) {
 		switch host {
@@ -267,10 +263,7 @@ func newHarnessWith(t *testing.T, o harnessOpts) *harness {
 		return nil, &url.Error{Op: "lookup", URL: host}
 	}
 	h := &harness{t: t, docker: &fakeDocker{states: model.ContainerStates{}}, caddy: &fakeCaddy{}, certs: &fakeCerts{}}
-	cfg := Config{DataDir: t.TempDir(), CaddySocket: "/run/caddy/admin.sock", Network: "naru-net", AdminDomain: envDomain, Version: "test", Install: install}
-	if install == "docker" {
-		cfg.SelfUpstream, cfg.CaddySites = "naru:8080", "/srv/sites"
-	}
+	cfg := Config{DataDir: t.TempDir(), Network: "naru-net", AdminDomain: envDomain, Version: "test"}
 	a, err := OpenWith(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), Outside{
 		Builder: fakeRegistry{}, Puller: fakeRegistry{}, Images: fakeImages{},
 		Starter: h.docker, Remover: h.docker, Switch: h.docker, Watcher: h.docker, Ports: h.docker, AppLogs: h.docker, Usage: h.docker,
@@ -1026,43 +1019,31 @@ func TestImportFromNginxFillsTheFormWithoutSaving(t *testing.T) {
 	}
 }
 
-// ── 설치 방식 ─────────────────────────────
+// ── 실행 방식 ─────────────────────────────
 
-// 설치형은 같은 화면·같은 흐름이고, 웹서버가 닿는 방법만 다르다 — 컨테이너는 IP로, "이 서버"는 127.0.0.1로.
-func TestHostInstallReachesContainersByIP(t *testing.T) {
-	h := newHarnessIn(t, "", "host")
-	h.signedIn()
-	_, loc, _ := h.post("/services/new", url.Values{"kind": {"image"}, "source": {"traefik/whoami"}, "domain": {"who.example.com"}})
-	if !strings.HasPrefix(loc, "/services/1/deploys/") {
-		t.Fatalf("deploy starts: %q", loc)
-	}
-	h.app.wait()
-	ip := h.service(1).Live.InstanceIP
-	if ip == "" {
-		t.Fatal("the container's IP is recorded")
-	}
-	h.post("/services/new", url.Values{"kind": {"external"}, "upstream": {"localhost:5000"}, "domain": {"nas.example.com"}})
-	h.waitFor("containers by IP, this server as 127.0.0.1, the admin screen on loopback", func(cfg string) bool {
-		return strings.Contains(cfg, ip+":80") && strings.Contains(cfg, "127.0.0.1:5000") && strings.Contains(cfg, "127.0.0.1:8080") &&
-			!strings.Contains(cfg, "naru-who:80") && !strings.Contains(cfg, "host.docker.internal")
-	})
-	if !strings.Contains(h.caddy.last(), filepath.Join(h.app.cfg.DataDir, "sites")) && strings.Contains(h.caddy.last(), "/srv/sites") {
-		t.Fatal("static sites are served straight from the data folder")
-	}
-}
-
-func TestDockerInstallKeepsTheNetworkAlias(t *testing.T) {
+// 컨테이너는 별칭으로 보낸다 — 새 컨테이너가 같은 별칭을 받으니 배포해도 웹서버 설정이 그대로다.
+func TestContainersAreReachedByTheirAlias(t *testing.T) {
 	h := newHarness(t, "")
 	h.signedIn()
 	h.post("/services/new", url.Values{"kind": {"image"}, "source": {"traefik/whoami"}, "domain": {"who.example.com"}})
 	h.app.wait()
-	h.waitFor("containers by alias", func(cfg string) bool { return strings.Contains(cfg, "naru-who:80") })
+	h.post("/services/new", url.Values{"kind": {"external"}, "upstream": {"localhost:5000"}, "domain": {"nas.example.com"}})
+	h.waitFor("containers by alias, this server through host.docker.internal, the admin screen as naru:8080", func(cfg string) bool {
+		return strings.Contains(cfg, "naru-who:80") && strings.Contains(cfg, "host.docker.internal:5000") && strings.Contains(cfg, "naru:8080") &&
+			!strings.Contains(cfg, `"storage"`)
+	})
 }
 
-func TestUnknownInstallModeRefusesToStart(t *testing.T) {
-	_, err := OpenWith(Config{DataDir: t.TempDir(), Install: "kubernetes"}, slog.New(slog.NewTextHandler(io.Discard, nil)), Outside{Clock: system.Clock{}, Random: system.Random{}, Sender: &fakeCaddy{}})
-	if err == nil || !strings.Contains(err.Error(), "NARU_INSTALL") {
-		t.Fatalf("got %v", err)
+// 설치형(systemd)은 지웠다 — 그 설정으로 켜면 조용히 다른 기본값으로 뜨지 않고, 이유를 말하고 멈춘다.
+func TestTheRemovedHostInstallRefusesToStart(t *testing.T) {
+	for _, install := range []string{"host", "kubernetes"} {
+		_, err := OpenWith(Config{DataDir: t.TempDir(), install: install}, slog.New(slog.NewTextHandler(io.Discard, nil)), Outside{Clock: system.Clock{}, Random: system.Random{}, Sender: &fakeCaddy{}})
+		if err == nil || !strings.Contains(err.Error(), "NARU_INSTALL") || !strings.Contains(err.Error(), "deploy/docker") {
+			t.Fatalf("%s: got %v", install, err)
+		}
+	}
+	if _, err := (Config{DataDir: t.TempDir(), install: "docker"}).resolved(); err != nil {
+		t.Fatalf("an old compose file that still says docker keeps working: %v", err)
 	}
 }
 
@@ -1154,7 +1135,7 @@ func TestAlertAddressesFromTheScreen(t *testing.T) {
 }
 
 func TestAServiceThatStopsAndComesBackIsReported(t *testing.T) {
-	h := newHarnessWith(t, harnessOpts{install: "docker", watchEvery: 20 * time.Millisecond})
+	h := newHarnessWith(t, harnessOpts{watchEvery: 20 * time.Millisecond})
 	h.signedIn()
 	rcv := newReceiver(t)
 	h.post("/settings/alerts", url.Values{"url": {rcv.srv.URL + "/hook"}})
@@ -1187,12 +1168,12 @@ func TestAServiceThatStopsAndComesBackIsReported(t *testing.T) {
 // ── 진단 (M6-3) ─────────────────────────────
 
 func TestWrongPortIsDiagnosedAndFixedFromHome(t *testing.T) {
-	h := newHarnessWith(t, harnessOpts{install: "docker", watchEvery: 20 * time.Millisecond})
+	h := newHarnessWith(t, harnessOpts{watchEvery: 20 * time.Millisecond})
 	h.signedIn()
 	id := h.createService(model.NewService{Name: name("blog"), Kind: model.KindImage, Source: "me/blog", Alias: "naru-blog", Port: 3000}, model.ServiceSecrets{})
 	store.NewLiveStates(h.app.db).Save(ctx, id, model.LiveState{Alias: "naru-blog", Instance: "naru-blog-1", Port: 3000})
-	h.docker.set("naru-blog-1", model.ContainerState{Name: "naru-blog-1", Running: true, State: "running", IP: "172.30.0.5", Ports: []model.Port{8080}})
-	h.docker.listen("172.30.0.5", 8080)                                                              // 이미지가 8080을 열었고, 앱도 거기서 듣는다
+	h.docker.set("naru-blog-1", model.ContainerState{Name: "naru-blog-1", Running: true, State: "running", Ports: []model.Port{8080}})
+	h.docker.listen("naru-blog-1", 8080)                                                             // 이미지가 8080을 열었고, 앱도 거기서 듣는다
 	h.post(fmt.Sprintf("/services/%d/domains", id), url.Values{"domain": {"elsewhere.example.com"}}) // DNS는 다른 서버를 가리킨다
 
 	home := func(want string) string {
@@ -1257,7 +1238,7 @@ func TestWrongPortIsDiagnosedAndFixedFromHome(t *testing.T) {
 // ── CPU·메모리 (M6-4) ─────────────────────────
 
 func TestServiceUsageOnHomeAndServicePage(t *testing.T) {
-	h := newHarnessWith(t, harnessOpts{install: "docker", watchEvery: 20 * time.Millisecond})
+	h := newHarnessWith(t, harnessOpts{watchEvery: 20 * time.Millisecond})
 	h.signedIn()
 	id := h.createService(model.NewService{Name: name("blog"), Kind: model.KindImage, Source: "me/blog", Alias: "naru-blog", Port: 80}, model.ServiceSecrets{})
 	store.NewLiveStates(h.app.db).Save(ctx, id, model.LiveState{Alias: "naru-blog", Instance: "naru-blog-1", Port: 80})

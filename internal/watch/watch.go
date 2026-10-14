@@ -258,7 +258,7 @@ func (w *healthWatcher) problem(ctx context.Context, s model.Service, states mod
 	}
 	pctx, cancel := context.WithTimeout(ctx, answerAfter)
 	defer cancel()
-	if w.p.Ports.Answers(pctx, reach(s, st), s.Port) != nil {
+	if w.p.Ports.Answers(pctx, reach(s), s.Port) != nil {
 		return "noanswer"
 	}
 	return ""

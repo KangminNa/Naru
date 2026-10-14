@@ -51,11 +51,11 @@ func newDiagRig(publicIP string) *diagRig {
 
 func app(port model.Port) model.Service {
 	return model.Service{ID: 1, Name: name("blog"), Kind: model.KindImage, Port: port,
-		Live: model.LiveState{Alias: "naru-blog", Instance: "naru-blog-3", InstanceIP: "10.0.0.3"}}
+		Live: model.LiveState{Alias: "naru-blog", Instance: "naru-blog-3"}}
 }
 
 func running(ports ...model.Port) model.ContainerStates {
-	return model.ContainerStates{"naru-blog-3": {Name: "naru-blog-3", Running: true, State: "running", IP: "10.0.0.3", Ports: ports}}
+	return model.ContainerStates{"naru-blog-3": {Name: "naru-blog-3", Running: true, State: "running", Ports: ports}}
 }
 
 func keys(fs []model.Finding) []string {
@@ -68,7 +68,7 @@ func keys(fs []model.Finding) []string {
 
 func TestAppListeningOnAnotherPortIsFoundWithAFix(t *testing.T) {
 	r := newDiagRig("")
-	r.ports.only["10.0.0.3"] = 8080 // 이미지가 8080을 열었고, 앱도 거기서 듣는다
+	r.ports.only["naru-blog-3"] = 8080 // 이미지가 8080을 열었고, 앱도 거기서 듣는다
 	fs := r.d.Diagnose(ctx, app(3000), running(8080))
 	if len(fs) != 1 {
 		t.Fatalf("%+v", fs)
@@ -79,7 +79,7 @@ func TestAppListeningOnAnotherPortIsFoundWithAFix(t *testing.T) {
 	}
 
 	// EXPOSE가 없어도 흔한 포트는 찔러 본다
-	r.ports.only["10.0.0.3"] = 3000
+	r.ports.only["naru-blog-3"] = 3000
 	if fs := r.d.Diagnose(ctx, app(80), running()); len(fs) != 1 || fs[0].FixPort != 3000 {
 		t.Fatalf("%+v", fs)
 	}
@@ -89,12 +89,12 @@ func TestAppListeningOnAnotherPortIsFoundWithAFix(t *testing.T) {
 		t.Fatalf("%+v tried %v", fs, r.ports.tried)
 	}
 	// 아무 포트도 응답하지 않으면 고칠 방법을 모른다 — 멈춤은 지켜보기가 말한다
-	r.ports.deaf["10.0.0.3"] = true
+	r.ports.deaf["naru-blog-3"] = true
 	if fs := r.d.Diagnose(ctx, app(3000), running(8080)); len(fs) != 0 {
 		t.Fatalf("%+v", fs)
 	}
 	// 실행 중이 아니거나 Docker를 못 읽으면 포트를 보지 않는다
-	r.ports.deaf["10.0.0.3"], r.ports.only["10.0.0.3"] = false, 8080
+	r.ports.deaf["naru-blog-3"], r.ports.only["naru-blog-3"] = false, 8080
 	if fs := r.d.Diagnose(ctx, app(3000), nil); len(fs) != 0 {
 		t.Fatalf("%+v", fs)
 	}
@@ -203,8 +203,8 @@ func TestSnapshotCollectsFindingsHeaviestFirst(t *testing.T) {
 	}
 
 	// 응답 없음 + 다른 포트가 응답 → "응답 없음" 대신 고칠 방법
-	r.containers.states["naru-blog-3"] = model.ContainerState{Name: "naru-blog-3", Running: true, State: "running", IP: "10.0.0.3", Ports: []model.Port{8080}}
-	r.ports.only["10.0.0.3"] = 8080
+	r.containers.states["naru-blog-3"] = model.ContainerState{Name: "naru-blog-3", Running: true, State: "running", Ports: []model.Port{8080}}
+	r.ports.only["naru-blog-3"] = 8080
 	r.check()
 	r.check()
 	snap = r.w.Snapshot()
@@ -214,7 +214,7 @@ func TestSnapshotCollectsFindingsHeaviestFirst(t *testing.T) {
 
 	// 배포 중에는 다시 보지 않고 마지막 진단을 그대로 둔다
 	r.deployer.busy[1] = true
-	r.ports.only["10.0.0.3"] = 80
+	r.ports.only["naru-blog-3"] = 80
 	r.check()
 	if got := keys(r.w.Snapshot().Findings); !slices.Equal(got, []string{"find.port", "find.cert"}) {
 		t.Fatalf("%v", got)

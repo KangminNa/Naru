@@ -37,7 +37,6 @@ services:
       - path: .env
         required: false
     environment:
-      - NARU_INSTALL=docker
       - NARU_NETWORK=${NARU_NETWORK:-naru-net}
     ports:
       - "127.0.0.1:8080:8080"                       # 웹서버를 거치지 않는 뒷문 — 서버 안(ssh 터널)에서만

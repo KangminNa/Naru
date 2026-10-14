@@ -244,7 +244,7 @@ func (c *Client) create(ctx context.Context, s Spec) (string, error) {
 	return out.ID, err
 }
 
-// ensureNetwork는 앱 네트워크가 없으면 만든다. 설치형에서는 compose가 만들어 주지 않는다.
+// ensureNetwork는 앱 네트워크가 없으면 만든다 (compose는 external 네트워크를 만들어 주지 않는다).
 func (c *Client) ensureNetwork(ctx context.Context, name string) error {
 	err := c.call(ctx, http.MethodGet, "/networks/"+url.PathEscape(name), nil, nil)
 	if !errors.Is(err, ErrNotFound) {
@@ -270,7 +270,6 @@ type Inspection struct {
 	Running  bool
 	Status   string
 	ExitCode int
-	IPs      map[string]string // 네트워크 이름 → IP
 }
 
 func (c *Client) inspect(ctx context.Context, name string) (Inspection, error) {
@@ -280,18 +279,11 @@ func (c *Client) inspect(ctx context.Context, name string) (Inspection, error) {
 			Status   string
 			ExitCode int
 		}
-		NetworkSettings struct {
-			Networks map[string]struct{ IPAddress string }
-		}
 	}
 	if err := c.call(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/json", nil, &raw); err != nil {
 		return Inspection{}, err
 	}
-	ips := map[string]string{}
-	for net, n := range raw.NetworkSettings.Networks {
-		ips[net] = n.IPAddress
-	}
-	return Inspection{Running: raw.State.Running, Status: raw.State.Status, ExitCode: raw.State.ExitCode, IPs: ips}, nil
+	return Inspection{Running: raw.State.Running, Status: raw.State.Status, ExitCode: raw.State.ExitCode}, nil
 }
 
 // Logs는 컨테이너 출력의 마지막 n줄이다 (stdout·stderr 섞어서).

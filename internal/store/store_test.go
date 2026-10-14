@@ -533,16 +533,6 @@ func TestWebSettingsStorage(t *testing.T) {
 	}
 }
 
-func TestLiveStateKeepsTheInstanceIP(t *testing.T) {
-	db := open(t, t.TempDir())
-	r := NewServices(db)
-	id, _ := r.Create(ctx, model.NewService{Name: name("x"), Kind: model.KindImage})
-	NewLiveStates(db).Save(ctx, id, model.LiveState{Alias: "naru-x", Instance: "naru-x-2", InstanceIP: "172.18.0.4", Port: 80})
-	if s, _ := r.Get(ctx, id); s.Live.InstanceIP != "172.18.0.4" {
-		t.Fatalf("%+v", s.Live)
-	}
-}
-
 func TestAlertChannelsAndDeliveries(t *testing.T) {
 	db := open(t, t.TempDir())
 	ch := NewChannels(db)

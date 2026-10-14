@@ -424,7 +424,7 @@ func TestR11RegexpOnlyInModel(t *testing.T) {
 	}
 }
 
-// R12: 설정을 환경 변수에서 읽는 건 app(조립)뿐이다 — 그래서 설치 방식(NARU_INSTALL)에 따른 분기도 app에만 있다.
+// R12: 설정을 환경 변수에서 읽는 건 app(조립)·cmd뿐이다 — 다른 패키지는 만들 때 값을 받는다.
 // (도구가 자식 프로세스에 환경을 그대로 넘기는 os.Environ은 설정 읽기가 아니라 허용한다.)
 func TestR12EnvironmentOnlyInApp(t *testing.T) {
 	for _, f := range sources(t) {

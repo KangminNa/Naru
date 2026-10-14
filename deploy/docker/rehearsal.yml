@@ -37,7 +37,6 @@ services:
       - path: .env
         required: false
     environment:
-      - NARU_INSTALL=docker
       - NARU_NETWORK=${NARU_NETWORK:-naru-net}
       - NARU_TLS=internal                           # 공개 CA에 요청하지 않는다
       - NARU_HTTPS_PORT=18443

@@ -84,7 +84,6 @@ docker compose logs naru | grep setup         # 첫 설정 주소 — 로그를 
 - 운영 구성은 **`deploy/docker/`에서만** 돌립니다. 저장소 맨 위의 `compose.yml`은 로컬 개발용입니다.
 - 업데이트: `git pull && docker compose up -d --build` (`deploy/docker`에서). 웹서버는 그대로 돌고 Naru만 다시 뜹니다.
 - 바깥에는 80/443만 열립니다. Naru 자신의 화면은 `127.0.0.1:8080`(서버 안)과 관리 주소로만 닿습니다.
-- 설치형(systemd)도 있습니다 — [설치형 설치](docs/install-host.md).
 
 계정을 잊었다면 서버 셸에서:
 

@@ -27,10 +27,6 @@ type Tools struct {
 	Ports      contract.PortChecker
 	Files      contract.SiteFiles
 
-	// 웹서버가 컨테이너·"이 서버"에 닿는 방법 — 설치 방식에 따라 app이 고른다 (비면 Docker 방식).
-	ContainerDestination contract.DestinationFinder
-	ExternalDestination  contract.DestinationFinder
-
 	Network    string // 앱 컨테이너가 붙는 네트워크
 	SitesShown string // 웹서버 컨테이너에서 본 정적 사이트 폴더 (기본 /srv/sites)
 
@@ -50,14 +46,7 @@ func NewLookup(t Tools) contract.KindLookup {
 		t.PollEvery = 500 * time.Millisecond
 	}
 	swapper := ContainerSwapper{t}
-	container := t.ContainerDestination
-	if container == nil {
-		container = ContainerAliasDestination{}
-	}
-	external := t.ExternalDestination
-	if external == nil {
-		external = ExternalDestination{}
-	}
+	container, external := ContainerAliasDestination{}, ExternalDestination{}
 	status := ContainerStatus{}
 	return kindLookup{
 		model.KindRepo: {

@@ -84,7 +84,6 @@ docker compose logs naru | grep setup         # first-run link — only someone 
 - Run the production setup **only from `deploy/docker/`**. The `compose.yml` at the repo root is for local development.
 - Update: `git pull && docker compose up -d --build` (in `deploy/docker`). The web server keeps running; only Naru restarts.
 - Only 80/443 are exposed. Naru's own screen is reachable at `127.0.0.1:8080` (on the server) and through the admin address.
-- There is also a host install (systemd) — [host install](docs/install-host.md) (Korean).
 
 Forgot your account? From the server shell:
 

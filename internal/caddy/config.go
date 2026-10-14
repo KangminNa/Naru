@@ -27,7 +27,6 @@ type caddyConfig struct {
 	Admin struct {
 		Listen string `json:"listen"`
 	} `json:"admin"`
-	Storage *module        `json:"storage,omitempty"`
 	Logging *loggingConfig `json:"logging,omitempty"`
 	Apps    struct {
 		HTTP struct {
@@ -126,9 +125,6 @@ func (JSONWriter) Write(p model.SiteMap) ([]byte, error) {
 
 	var c caddyConfig
 	c.Admin.Listen = SocketListen(p.AdminSocket)
-	if p.Storage != "" {
-		c.Storage = &module{"module": "file_system", "root": p.Storage}
-	}
 	var logs *serverLogs
 	if p.AccessLog != "" {
 		// 접근 로그는 서비스 주소만 남긴다. 관리 주소와 주소 없이 들어온 요청은 남기지 않는다 —

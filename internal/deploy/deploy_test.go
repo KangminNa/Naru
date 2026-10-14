@@ -31,7 +31,6 @@ type fakeDocker struct {
 	builds     []string
 	removedImg []string
 	listens    func(name string) bool // nil이면 모두 듣는다
-	nextIP     int
 	exits      func(name string) bool // 시작하자마자 죽는가
 }
 
@@ -39,7 +38,6 @@ type fakeContainer struct {
 	spec    model.ContainerSpec
 	running bool
 	exited  bool
-	ip      string
 }
 
 func newFakeDocker() *fakeDocker {
@@ -86,19 +84,18 @@ func (f *fakeDocker) Remove(_ context.Context, name string) error {
 	return nil
 }
 
-func (f *fakeDocker) Start(_ context.Context, s model.ContainerSpec) (string, error) {
+func (f *fakeDocker) Start(_ context.Context, s model.ContainerSpec) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.containers[s.Name]; ok {
-		return "", errors.New("name in use")
+		return errors.New("name in use")
 	}
-	f.nextIP++
-	c := &fakeContainer{spec: s, running: true, ip: fmt.Sprintf("10.9.0.%d", f.nextIP)}
+	c := &fakeContainer{spec: s, running: true}
 	if f.exits != nil && f.exits(s.Name) {
 		c.running, c.exited = false, true
 	}
 	f.containers[s.Name] = c
-	return c.ip, nil
+	return nil
 }
 
 func (f *fakeDocker) TurnOff(_ context.Context, name string) error {
@@ -152,17 +149,10 @@ func (f *fakeDocker) BelongingTo(_ context.Context, id model.ServiceID) ([]strin
 	return out, nil
 }
 
-// Answers는 컨테이너가 실행 중이고 듣고 있으면 성공한다.
-// Answers는 컨테이너가 실행 중이고 듣고 있으면 성공한다. 응답 확인은 IP로 온다.
-func (f *fakeDocker) Answers(_ context.Context, host string, _ model.Port) error {
+// Answers는 컨테이너가 실행 중이고 듣고 있으면 성공한다. 응답 확인은 컨테이너 이름으로 온다.
+func (f *fakeDocker) Answers(_ context.Context, name string, _ model.Port) error {
 	f.mu.Lock()
-	var c *fakeContainer
-	name := ""
-	for n, x := range f.containers {
-		if x.ip == host {
-			c, name = x, n
-		}
-	}
+	c := f.containers[name]
 	listens := f.listens
 	f.mu.Unlock()
 	if c == nil || !c.running || (listens != nil && !listens(name)) {
@@ -594,16 +584,12 @@ func TestEnvAndVolumes(t *testing.T) {
 	}
 }
 
-// 웹서버가 새 것을 가리키기 전에 옛 것을 내리면, 설치형(IP로 보냄)에서는 그 사이 요청이 끊긴다.
+// 웹서버를 맞추기 전에 옛 것을 내리지 않는다 — 맞추기가 실패하면 둘 다 남긴다 (아래 테스트).
 func TestTheOldVersionServesUntilTheWebServerPointsAtTheNewOne(t *testing.T) {
 	r := newRig(t)
 	r.docker.images["me/app"] = model.ImageDetails{ID: "sha256:v", Ports: []model.Port{80}}
 	id := r.create(model.NewService{Name: name("app"), Kind: model.KindImage, Source: "me/app"}, "")
 	first := r.deploy(id)
-	old := r.get(id).Live
-	if old.InstanceIP == "" {
-		t.Fatal("the container's IP is recorded")
-	}
 	r.sync.seen = nil
 	second := r.deploy(id)
 	if second.Status != model.DeploySuccess || len(r.sync.seen) != 1 {
@@ -614,9 +600,6 @@ func TestTheOldVersionServesUntilTheWebServerPointsAtTheNewOne(t *testing.T) {
 	}
 	if names := r.docker.names(); len(names) != 1 || names[0] != fmt.Sprintf("naru-app-%d", second.ID) {
 		t.Fatalf("after the switch the old one is retired: %v (first #%d)", names, first.ID)
-	}
-	if now := r.get(id).Live; now.InstanceIP == old.InstanceIP || now.InstanceIP == "" {
-		t.Fatalf("the new IP is recorded: %+v", now)
 	}
 }
 

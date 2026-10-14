@@ -108,8 +108,8 @@ func (d deployer) start(ctx context.Context, s model.Service, tools contract.Kin
 
 // run은 배포 하나를 끝까지 한다:
 // 만들기 → 새 것 띄우기 → 지금 상태 저장 → 웹서버 맞추기 → 옛 것 내리기 → 기록 → 정리 → 알림.
-// 어디서 실패해도 지금 도는 것은 그대로 남는다. 웹서버가 새 것을 가리키기 전에는 옛 것을 내리지 않는다 —
-// 설치형은 컨테이너 IP로 보내므로, 먼저 내리면 그 사이 요청이 끊긴다.
+// 어디서 실패해도 지금 도는 것은 그대로 남는다. 웹서버를 맞추기 전에는 옛 것을 내리지 않는다 —
+// 맞추기가 실패하면 둘 다 남겨 두고 다음 배포에서 정리한다.
 func (d deployer) run(s model.Service, tools contract.KindTools, did model.DeploymentID, from *model.Deployment) {
 	ctx, cancel := context.WithTimeout(d.base, 30*time.Minute)
 	defer cancel()

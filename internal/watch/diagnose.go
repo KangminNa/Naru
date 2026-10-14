@@ -85,7 +85,7 @@ func (d *diagnoser) wrongPort(ctx context.Context, s model.Service, states model
 	if !ok || st.State != "running" || s.Port == 0 {
 		return model.Finding{}, false
 	}
-	host := reach(s, st)
+	host := reach(s)
 	actx, cancel := context.WithTimeout(ctx, answerAfter)
 	err := d.p.Ports.Answers(actx, host, s.Port)
 	cancel()
@@ -181,16 +181,8 @@ func overlaps(a, b []string) bool {
 	return false
 }
 
-// reach는 Naru가 컨테이너의 앱에 닿는 주소다 — 지금 IP, 배포 때 기록한 IP, 그래도 없으면 컨테이너 이름.
-func reach(s model.Service, st model.ContainerState) string {
-	switch {
-	case st.IP != "":
-		return st.IP
-	case s.Live.InstanceIP != "":
-		return s.Live.InstanceIP
-	}
-	return s.Live.CurrentContainer()
-}
+// reach는 Naru가 컨테이너의 앱에 닿는 주소다 — Naru도 같은 네트워크에 있어 컨테이너 이름으로 닿는다.
+func reach(s model.Service) string { return s.Live.CurrentContainer() }
 
 // portArg는 문구에 끼울 포트다.
 func portArg(p model.Port) string { return strconv.Itoa(int(p)) }

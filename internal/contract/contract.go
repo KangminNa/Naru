@@ -168,7 +168,7 @@ type VersionBuilder interface {
 }
 
 // VersionSwapper는 새 버전으로 바꿔 끼운다. Swap은 새 것을 띄우고 응답까지만 확인한다 — 실패하면 지금 도는 것을 그대로 둔다.
-// Retire는 웹서버가 새 것을 가리킨 뒤에 옛 것을 내린다 (그 전에 내리면 설치형에서 요청이 끊긴다).
+// Retire는 웹서버를 맞춘 뒤에 옛 것을 내린다 (맞추기가 실패하면 둘 다 남긴다).
 type VersionSwapper interface {
 	Swap(ctx context.Context, req model.SwapRequest, v model.Version, log DeployLogWriter) (model.LiveState, error)
 	Retire(ctx context.Context, s model.Service, keep model.LiveState, log DeployLogWriter)
@@ -400,9 +400,9 @@ type ImageCleaner interface {
 	Remove(ctx context.Context, ref string) error
 }
 
-// ContainerStarter는 컨테이너를 만들어 띄우고, 앱 네트워크에서의 IP를 알려준다 (네트워크가 없으면 만든다).
+// ContainerStarter는 컨테이너를 만들어 띄운다 (네트워크가 없으면 만든다).
 type ContainerStarter interface {
-	Start(ctx context.Context, spec model.ContainerSpec) (ip string, err error)
+	Start(ctx context.Context, spec model.ContainerSpec) error
 }
 
 // ContainerRemover는 컨테이너를 없앤다.

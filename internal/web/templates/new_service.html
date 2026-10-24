@@ -44,6 +44,11 @@
     <label class="field"><span>{{t "field.domain"}}</span>
       <input class="input mono" name="domain" value="{{$f.Domain}}" placeholder="app.example.com">
       <small>{{t "new.domain.hint"}}</small></label>
+    {{if eq $f.Kind "repo" "image"}}
+    <label class="field"><span>{{t "field.env"}}</span>
+      <textarea class="input mono" name="env" rows="4" placeholder="DATABASE_URL=postgres://…&#10;NODE_ENV=production">{{$f.Env}}</textarea>
+      <small>{{t "env.hint"}}</small></label>
+    {{end}}
 
     <details class="more">
       <summary>{{t "new.more"}}</summary>
@@ -67,8 +72,6 @@
         <label class="field"><span>{{t "service.port"}}</span>
           <input class="input mono" name="port" value="{{if $f.Port}}{{$f.Port}}{{end}}" inputmode="numeric" placeholder="3000">
           <small>{{t "new.port.hint"}}</small></label>
-        <label class="field"><span>{{t "field.env"}}</span>
-          <textarea class="input mono" name="env" rows="3" placeholder="NODE_ENV=production">{{$f.Env}}</textarea></label>
         <label class="field"><span>{{t "field.volumes"}}</span>
           <textarea class="input mono" name="volumes" rows="2" placeholder="/srv/app-data:/data">{{$f.Volumes}}</textarea>
           <small>{{t "new.volumes.hint"}}</small></label>

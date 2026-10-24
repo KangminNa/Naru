@@ -1,14 +1,23 @@
 package model
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // InputError는 어느 칸이 왜 틀렸는지다. 문구는 만들지 않는다 — 화면이 Code로 한국어·영어 문구를 고른다.
 type InputError struct {
 	Field string // 어느 칸 ("domain", "repo" …)
 	Code  string // 무엇이 문제인가 ("domain", "domaintaken", "admindomain" …)
+	Line  int    // 여러 줄 칸(환경 변수)이면 몇 번째 줄인가 — 0이면 줄과 상관없다
 }
 
-func (e InputError) Error() string { return "invalid " + e.Field + ": " + e.Code }
+func (e InputError) Error() string {
+	if e.Line > 0 {
+		return fmt.Sprintf("invalid %s (line %d): %s", e.Field, e.Line, e.Code)
+	}
+	return "invalid " + e.Field + ": " + e.Code
+}
 
 // AsInputError는 err가 InputError면 꺼낸다.
 func AsInputError(err error) (InputError, bool) {

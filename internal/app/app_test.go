@@ -801,7 +801,7 @@ func TestCreateServiceValidation(t *testing.T) {
 func TestSettingsDomainsAndDelete(t *testing.T) {
 	h := newHarness(t, "")
 	h.signedIn()
-	env, _ := model.ParseEnvVars("A=1")
+	env, _, _ := model.ParseEnvVars("A=1")
 	id := h.createService(model.NewService{Name: name("api"), Kind: model.KindImage, Source: "me/api", Alias: "naru-api", Port: 3000}, model.ServiceSecrets{Env: env})
 
 	code, loc, _ := h.post(fmt.Sprintf("/services/%d/settings", id), url.Values{"source": {"me/api"}, "port": {"8080"}, "env": {"A=1"}, "auto_deploy": {"1"}})
@@ -1232,6 +1232,50 @@ func TestWrongPortIsDiagnosedAndFixedFromHome(t *testing.T) {
 
 	if code, _, _ := h.post(fmt.Sprintf("/services/%d/port", id), url.Values{"port": {"0"}}); code != http.StatusBadRequest {
 		t.Fatalf("a port is required: %d", code)
+	}
+}
+
+// ── 환경 변수 (.env 붙여넣기) ─────────────────────
+
+func TestPastingADotenvFileWhenCreatingAService(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+
+	// 환경 변수 칸은 접힌 "더 정하기" 밖에 있다
+	_, _, page := h.get("/services/new?kind=image")
+	if i, j := strings.Index(page, `name="env"`), strings.Index(page, "<details"); i < 0 || j < 0 || i > j {
+		t.Fatal("the env field sits above the folded options")
+	}
+
+	dotenv := "# app\nexport DATABASE_URL=\"postgres://u:p@db/app\"\nNODE_ENV=production # prod\nGREETING='hello world'\n"
+	code, loc, _ := h.post("/services/new", url.Values{"kind": {"image"}, "source": {"me/app"}, "env": {dotenv}})
+	if code != http.StatusSeeOther || !strings.Contains(loc, "envfix=quotes-2.export-1.comment-1") {
+		t.Fatalf("%d %q", code, loc)
+	}
+	if strings.Contains(loc, "DATABASE_URL") || strings.Contains(loc, "postgres") {
+		t.Fatal("names and values never go into the address")
+	}
+	h.app.wait()
+	sec, _ := h.secretsOf().Get(ctx, 1)
+	if got := strings.Join(sec.Env.List(), "|"); got != "DATABASE_URL=postgres://u:p@db/app|NODE_ENV=production|GREETING=hello world" {
+		t.Fatalf("the container gets plain values: %q", got)
+	}
+	if _, _, body := h.get(loc); !strings.Contains(body, "따옴표 벗김 2줄") || !strings.Contains(body, "export 뺌 1줄") {
+		t.Fatal("the deploy page says what was converted")
+	}
+
+	// 설정에서도 접지 않고 보이고, 틀린 줄은 몇 번째인지 말한다
+	_, _, page = h.get("/services/1")
+	if !strings.Contains(page, "DATABASE_URL=postgres://u:p@db/app") {
+		t.Fatal("the settings show the stored form")
+	}
+	code, _, body := h.post("/services/1/settings", url.Values{"source": {"me/app"}, "env": {"A=1\nB=\"unclosed"}})
+	if code != http.StatusBadRequest || !strings.Contains(body, "따옴표가 닫히지 않았") || !strings.Contains(body, "(2번째 줄)") {
+		t.Fatalf("%d — the error names the line", code)
+	}
+	code, loc, _ = h.post("/services/1/settings", url.Values{"source": {"me/app"}, "env": {"A = 1\nA=2"}})
+	if code != http.StatusSeeOther || !strings.Contains(loc, "envfix=spaces-1.duplicate-1") || !strings.HasSuffix(loc, "#settings") {
+		t.Fatalf("%d %q", code, loc)
 	}
 }
 

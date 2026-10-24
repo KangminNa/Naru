@@ -106,7 +106,7 @@ func TestSecretsAndLiveStateStaySeparate(t *testing.T) {
 	db := open(t, t.TempDir())
 	r := NewServices(db)
 	id, _ := r.Create(ctx, model.NewService{Name: name("blog"), Kind: model.KindRepo, Alias: "naru-blog", Port: 3000})
-	env, _ := model.ParseEnvVars("A=1\nB=2")
+	env, _, _ := model.ParseEnvVars("A=1\nB=2")
 	if err := NewSecrets(db).Set(ctx, id, model.ServiceSecrets{Env: env, GitToken: "ghp_x", WebhookSecret: "s"}); err != nil {
 		t.Fatal(err)
 	}

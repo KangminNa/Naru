@@ -258,7 +258,7 @@ func (r *rig) create(s model.NewService, env string) model.ServiceID {
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	e, err := model.ParseEnvVars(env)
+	e, _, err := model.ParseEnvVars(env)
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -565,7 +565,7 @@ func TestStopMarksTheServiceStopped(t *testing.T) {
 }
 
 func TestEnvAndVolumes(t *testing.T) {
-	if _, err := model.ParseEnvVars("A=1\nbad\n"); err == nil {
+	if _, _, err := model.ParseEnvVars("A=1\nbad\n"); err == nil {
 		t.Fatal("a line without = is refused on input")
 	}
 	env := model.StoredEnvVars("A=1\n# comment\n\nB = two words\n=nokey\nC=x=y\nbad\n").List()

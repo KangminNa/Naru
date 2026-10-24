@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -182,5 +183,88 @@ func TestCertificatesCoverDomains(t *testing.T) {
 	}
 	if (CertificateState{}).Usable(now) {
 		t.Fatal("no certificate is not usable")
+	}
+}
+
+// .env를 그대로 붙여 넣어도 받는다 — 저장할 때 "KEY=값"(= 뒤 그대로)으로 바꾸고, 고친 것을 알려 준다.
+func TestEnvVarsAcceptDotenvAndSayWhatChanged(t *testing.T) {
+	cases := []struct {
+		in, stored string
+		did        []EnvFix
+	}{
+		{"KEY=abc", "KEY=abc", nil},
+		{"export KEY=abc", "KEY=abc", []EnvFix{EnvFixExport}},
+		{`KEY="abc"`, "KEY=abc", []EnvFix{EnvFixQuotes}},
+		{`KEY='abc'`, "KEY=abc", []EnvFix{EnvFixQuotes}},
+		{`KEY="a \"b\" c\\d"`, `KEY=a "b" c\d`, []EnvFix{EnvFixQuotes}},
+		{`KEY='a \"b'`, `KEY=a \"b`, []EnvFix{EnvFixQuotes}},
+		{"KEY=abc # 설명", "KEY=abc", []EnvFix{EnvFixComment}},
+		{"KEY=http://x/#frag", "KEY=http://x/#frag", nil},
+		{`KEY="abc # 아님"`, "KEY=abc # 아님", []EnvFix{EnvFixQuotes}},
+		{`KEY="abc"   # 설명`, "KEY=abc", []EnvFix{EnvFixQuotes, EnvFixComment}},
+		{"KEY = abc ", "KEY=abc", []EnvFix{EnvFixSpaces}},
+		{"KEY=", "KEY=", nil},
+		{`KEY=""`, "KEY=", []EnvFix{EnvFixQuotes}},
+		{"KEY=a=b", "KEY=a=b", nil},
+		{"export  KEY=\"x\"", "KEY=x", []EnvFix{EnvFixExport, EnvFixQuotes}},
+	}
+	for _, c := range cases {
+		e, notes, err := ParseEnvVars(c.in)
+		if err != nil {
+			t.Errorf("%q: %v", c.in, err)
+			continue
+		}
+		if e.Text() != c.stored {
+			t.Errorf("%q stored as %q, want %q", c.in, e.Text(), c.stored)
+		}
+		var did []EnvFix
+		for _, n := range notes {
+			if n.Line != 1 || n.Key != "KEY" {
+				t.Errorf("%q: note %+v", c.in, n)
+			}
+			did = append(did, n.Did)
+		}
+		if fmt.Sprint(did) != fmt.Sprint(c.did) {
+			t.Errorf("%q: notes %v, want %v", c.in, did, c.did)
+		}
+		if got := e.List(); len(got) != 1 || got[0] != c.stored {
+			t.Errorf("%q: the container gets %v", c.in, got)
+		}
+	}
+
+	// 주석·빈 줄은 그대로, 같은 이름은 둘 다 두되(나중 것이 이긴다) 알린다
+	e, notes, err := ParseEnvVars("# DB\nA=1\n\nexport B='two words'\nA=3\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Text() != "# DB\nA=1\n\nB=two words\nA=3\n" {
+		t.Fatalf("%q", e.Text())
+	}
+	if fmt.Sprint(notes) != fmt.Sprint([]EnvNote{{4, "B", EnvFixExport}, {4, "B", EnvFixQuotes}, {5, "A", EnvFixDuplicate}}) {
+		t.Fatalf("%+v", notes)
+	}
+	if fmt.Sprint(e.List()) != "[A=1 B=two words A=3]" {
+		t.Fatalf("%v", e.List())
+	}
+
+	// 받지 않는 것 — 몇 번째 줄인지 함께
+	for in, want := range map[string]InputError{
+		"A=1\nbad":                        {Field: "env", Code: "env", Line: 2},
+		"A=1\n1BAD=x":                     {Field: "env", Code: "env", Line: 2},
+		`A="abc`:                          {Field: "env", Code: "envquote", Line: 1},
+		"A=1\nKEY=\"line one\nline two\"": {Field: "env", Code: "envmultiline", Line: 2},
+		`KEY="a\nb"`:                      {Field: "env", Code: "envmultiline", Line: 1},
+		`KEY="a"b`:                        {Field: "env", Code: "envquote", Line: 1},
+	} {
+		_, _, err := ParseEnvVars(in)
+		ie, ok := AsInputError(err)
+		if !ok || ie != want {
+			t.Errorf("%q: got %v, want %+v", in, err, want)
+		}
+	}
+
+	// 이미 저장된 값은 그대로 읽는다 — 따옴표가 든 예전 값의 뜻이 바뀌지 않는다
+	if got := StoredEnvVars(`KEY="kept"`).List(); len(got) != 1 || got[0] != `KEY="kept"` {
+		t.Fatalf("%v", got)
 	}
 }

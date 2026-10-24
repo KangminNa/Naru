@@ -290,11 +290,12 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `Email` | 인증서 연락처 이메일 |
 | `Username` | 계정 이름 — 영문·숫자·`.-_` 2~32자 |
 | `EnvVars` · `Volumes` | `KEY=value` 줄들 · `/서버경로:/컨테이너경로[:ro]` 줄들. 저장된 글은 `Stored…`로 그대로 읽고, 틀린 줄은 `List`가 건너뛴다 (v1에서 온 값을 잃지 않게) |
+| `EnvNote` · `EnvFix` | 환경 변수를 저장하면서 고친 줄 하나(줄 번호·이름·무엇을) · 고친 종류(export·따옴표·줄 끝 주석·공백·같은 이름). `ParseEnvVars`는 `.env`를 붙여 넣어도 받아서 저장할 모양(`KEY=값`, = 뒤 그대로)으로 바꾸고 고친 것을 알려 준다 — 저장된 값의 뜻과 `List`는 그대로다 (2026-10-19) |
 | `KindName` | 서비스 종류 이름. `ParseKindName`은 아는 이름인지만 본다 — 종류마다 다른 행동은 `kinds`만 안다 |
 | `ServiceID` · `DomainID` · `DeploymentID` · `AccountID` | 저장소가 준 번호 |
 
 `ParseDomainName(s) (DomainName, error)`를 지나지 않은 문자열은 `DomainName`이 될 수 없다. 그래서 저장·배포·웹서버는 **이미 검사된 값만** 받는다.
-틀리면 `InputError{Field, Code}`가 나온다. 문구는 화면이 `err.`+Code로 고른다.
+틀리면 `InputError{Field, Code, Line}`이 나온다. 문구는 화면이 `err.`+Code로 고르고, 여러 줄 칸(환경 변수)이면 몇 번째 줄인지(`Line`)를 덧붙인다.
 
 ### 계정
 

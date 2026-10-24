@@ -44,18 +44,19 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := readServiceForm(r)
-	fail := func(key string) {
+	fail := func(err error) {
 		f.Token = "" // 토큰은 다시 그리지 않는다
-		s.render(w, r, http.StatusBadRequest, "new_service", view{Nav: "home", User: &u, Err: key, Data: newServiceScreen{Kinds: kindNames(), Form: f}})
+		s.render(w, r, http.StatusBadRequest, "new_service", view{Nav: "home", User: &u, Err: errKeyOf(err), ErrLine: errLineOf(err),
+			Data: newServiceScreen{Kinds: kindNames(), Form: f}})
 	}
 	kind, err := model.ParseKindName(f.Kind)
 	if err != nil {
-		fail(errKeyOf(err))
+		fail(err)
 		return
 	}
-	in, err := f.input(kind)
+	in, notes, err := f.input(kind)
 	if err != nil {
-		fail(errKeyOf(err))
+		fail(err)
 		return
 	}
 	id, did, err := s.d.Launcher.Launch(r.Context(), in)
@@ -63,15 +64,15 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 		if _, isInput := model.AsInputError(err); !isInput {
 			s.d.Log.Error("create service", "err", err)
 		}
-		fail(errKeyOf(err))
+		fail(err)
 		return
 	}
 	s.d.Log.Info("service created", "service", id, "kind", f.Kind, "by", u.Username.String())
 	if err != nil || did == 0 {
-		redirect(w, r, fmt.Sprintf("/services/%d", id))
+		redirect(w, r, withEnvFix(fmt.Sprintf("/services/%d", id), notes))
 		return
 	}
-	redirect(w, r, fmt.Sprintf("/services/%d/deploys/%d", id, did))
+	redirect(w, r, withEnvFix(fmt.Sprintf("/services/%d/deploys/%d", id, did), notes))
 }
 
 // ── 서비스 하나: 동작 ───────────────────────
@@ -175,7 +176,7 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := readServiceForm(r)
-	in, err := f.input(v.Service.Kind)
+	in, notes, err := f.input(v.Service.Kind)
 	if err == nil {
 		in.Domain = model.DomainName{} // 설정 폼에는 주소가 없다 — 주소는 따로 붙이고 뗀다
 		var redeploy bool
@@ -184,7 +185,7 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 			if redeploy {
 				flash = "redeploy"
 			}
-			redirect(w, r, fmt.Sprintf("/services/%d?ok=%s#settings", v.Service.ID, flash))
+			redirect(w, r, withEnvFix(fmt.Sprintf("/services/%d?ok=%s", v.Service.ID, flash), notes)+"#settings")
 			return
 		}
 	}
@@ -193,7 +194,9 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 		s.d.Log.Error("save settings", "service", v.Service.Name.String(), "err", err)
 		status = http.StatusInternalServerError
 	}
-	s.renderService(w, r, u, v, status, "settings", errKeyOf(err), &f)
+	page := s.serviceView(r, u, v, "settings", &f)
+	page.Err, page.ErrLine = errKeyOf(err), errLineOf(err)
+	s.render(w, r, status, "service", page)
 }
 
 func (s *Server) addDomain(w http.ResponseWriter, r *http.Request) {
@@ -292,7 +295,7 @@ func (s *Server) deployPage(w http.ResponseWriter, r *http.Request) {
 		}
 		d.Steps = append(d.Steps, stepView{Label: label, State: st.State})
 	}
-	v := view{Nav: "home", User: &u, Data: d}
+	v := view{Nav: "home", User: &u, Data: d, EnvFixes: envFixesOf(r)}
 	if dv.Deployment.Status == model.DeployRunning {
 		v.Refresh = 2 // 진행 중에는 2초마다 새로 그린다
 	}
@@ -351,6 +354,7 @@ func (s *Server) servicePage(w http.ResponseWriter, r *http.Request) {
 	}
 	v := s.serviceView(r, u, sv, "", nil)
 	v.OK = okKeys[r.URL.Query().Get("ok")]
+	v.EnvFixes = envFixesOf(r)
 	if e := r.URL.Query().Get("err"); e != "" {
 		v.Err = errKeys[e]
 	}

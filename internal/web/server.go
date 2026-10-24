@@ -142,8 +142,10 @@ func (s *Server) routes() {
 type view struct {
 	Lang, Path, Nav, Version string
 	User                     *model.Account
-	Err, OK                  string // 문구 키
-	Refresh                  int    // 0이 아니면 그 초마다 다시 그린다 (진행 중인 배포)
+	Err, OK                  string   // 문구 키
+	ErrLine                  int      // 여러 줄 칸에서 틀린 줄 (0이면 없음)
+	EnvFixes                 []envFix // 환경 변수를 .env 형식에서 고쳐 저장했다는 알림
+	Refresh                  int      // 0이 아니면 그 초마다 다시 그린다 (진행 중인 배포)
 	Data                     any
 }
 

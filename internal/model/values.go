@@ -282,19 +282,151 @@ type EnvVars struct{ text string }
 
 var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-func ParseEnvVars(text string) (EnvVars, error) {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	for _, line := range strings.Split(text, "\n") {
+// EnvFix는 환경 변수를 저장하면서 고친 종류다.
+type EnvFix string
+
+const (
+	EnvFixExport    EnvFix = "export"    // 앞의 export를 뺐다
+	EnvFixQuotes    EnvFix = "quotes"    // 값을 감싼 따옴표를 벗겼다
+	EnvFixComment   EnvFix = "comment"   // 줄 끝 주석을 뺐다
+	EnvFixSpaces    EnvFix = "spaces"    // 이름·값 앞뒤 공백을 뺐다
+	EnvFixDuplicate EnvFix = "duplicate" // 같은 이름이 앞에 또 있다 (나중 것이 이긴다)
+)
+
+// EnvNote는 저장하면서 고친 줄 하나다 — 화면이 "이렇게 바꿨어요"로 보여 준다. 값은 담지 않는다.
+type EnvNote struct {
+	Line int
+	Key  string
+	Did  EnvFix
+}
+
+// ParseEnvVars는 화면에 적은 글(.env를 붙여 넣어도 된다)을 저장할 모양으로 바꾼다.
+// 저장되는 줄은 늘 "KEY=값"(= 뒤 그대로)이라 컨테이너에 넘기는 규칙(List)과 이미 저장된 값의 뜻은 바뀌지 않는다.
+// .env처럼 적은 것 — export, 따옴표, 줄 끝 주석, 앞뒤 공백 — 은 풀어서 저장하고 notes로 알린다.
+// 여러 줄 값과 닫히지 않은 따옴표는 받지 않는다 (몇 번째 줄인지 InputError.Line으로).
+func ParseEnvVars(text string) (EnvVars, []EnvNote, error) {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	var notes []EnvNote
+	seen := map[string]bool{}
+	for i, line := range lines {
+		n := i + 1
 		t := strings.TrimSpace(line)
 		if t == "" || strings.HasPrefix(t, "#") {
+			out = append(out, line)
 			continue
 		}
-		k, _, ok := strings.Cut(line, "=")
-		if !ok || !envKeyPattern.MatchString(strings.TrimSpace(k)) {
-			return EnvVars{}, InputError{Field: "env", Code: "env"}
+		var did []EnvFix
+		if rest, ok := cutExport(t); ok {
+			t, did = rest, append(did, EnvFixExport)
+		}
+		k, raw, ok := strings.Cut(t, "=")
+		key := strings.TrimSpace(k)
+		if !ok || !envKeyPattern.MatchString(key) {
+			return EnvVars{}, nil, InputError{Field: "env", Code: "env", Line: n}
+		}
+		value, fixes, code := envValue(raw, lines[i+1:])
+		if code != "" {
+			return EnvVars{}, nil, InputError{Field: "env", Code: code, Line: n}
+		}
+		if key != k && !contains(fixes, EnvFixSpaces) {
+			fixes = append(fixes, EnvFixSpaces)
+		}
+		did = append(did, fixes...)
+		if seen[key] {
+			did = append(did, EnvFixDuplicate)
+		}
+		seen[key] = true
+		for _, d := range did {
+			notes = append(notes, EnvNote{Line: n, Key: key, Did: d})
+		}
+		out = append(out, key+"="+value)
+	}
+	return EnvVars{strings.Join(out, "\n")}, notes, nil
+}
+
+func cutExport(t string) (string, bool) {
+	for _, p := range []string{"export ", "export\t"} {
+		if rest, ok := strings.CutPrefix(t, p); ok {
+			return strings.TrimLeft(rest, " \t"), true
 		}
 	}
-	return EnvVars{text}, nil
+	return t, false
+}
+
+// envValue는 = 뒤의 글을 값으로 푼다. code가 비어 있지 않으면 받지 않는 이유다 (InputError.Code).
+// next는 뒤따르는 줄들이다 — 닫히지 않은 따옴표가 다음 줄에서 닫히면 여러 줄 값으로 본다.
+func envValue(raw string, next []string) (value string, fixes []EnvFix, code string) {
+	s := strings.TrimLeft(raw, " \t")
+	if s != raw && strings.TrimSpace(s) != "" {
+		fixes = append(fixes, EnvFixSpaces)
+	}
+	if s == "" {
+		return "", fixes, ""
+	}
+	if q := s[0]; q == '"' || q == '\'' {
+		var b strings.Builder
+		closed := -1
+		for j := 1; j < len(s); j++ {
+			c := s[j]
+			if q == '"' && c == '\\' && j+1 < len(s) {
+				switch s[j+1] {
+				case '"', '\\':
+					b.WriteByte(s[j+1])
+					j++
+					continue
+				case 'n':
+					return "", nil, "envmultiline"
+				}
+			}
+			if c == q {
+				closed = j
+				break
+			}
+			b.WriteByte(c)
+		}
+		if closed < 0 {
+			for _, l := range next {
+				if strings.ContainsRune(l, rune(q)) {
+					return "", nil, "envmultiline"
+				}
+			}
+			return "", nil, "envquote"
+		}
+		fixes = append(fixes, EnvFixQuotes)
+		switch after := strings.TrimSpace(s[closed+1:]); {
+		case after == "":
+		case strings.HasPrefix(after, "#"):
+			fixes = append(fixes, EnvFixComment)
+		default:
+			return "", nil, "envquote"
+		}
+		return b.String(), fixes, ""
+	}
+	// 따옴표가 없으면 공백 뒤의 #부터는 주석이다 (http://x/#frag 처럼 붙은 #은 값)
+	for j := 1; j < len(s); j++ {
+		if s[j] == '#' && (s[j-1] == ' ' || s[j-1] == '\t') {
+			s = s[:j]
+			fixes = append(fixes, EnvFixComment)
+			break
+		}
+	}
+	if trimmed := strings.TrimRight(s, " \t"); trimmed != s {
+		s = trimmed
+		if !contains(fixes, EnvFixComment) && !contains(fixes, EnvFixSpaces) {
+			fixes = append(fixes, EnvFixSpaces)
+		}
+	}
+	return s, fixes, ""
+}
+
+func contains(fixes []EnvFix, f EnvFix) bool {
+	for _, x := range fixes {
+		if x == f {
+			return true
+		}
+	}
+	return false
 }
 
 // StoredEnvVars는 이미 저장된 글을 그대로 쓴다 — 검사하지 않는다. 잘못된 줄은 List가 건너뛴다.

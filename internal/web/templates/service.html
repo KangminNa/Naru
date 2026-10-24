@@ -181,8 +181,9 @@
     {{if $.Data.Container}}
     <label class="field"><span>{{t "service.port"}}</span><input class="input mono" name="port" value="{{if $f.Port}}{{$f.Port}}{{end}}" inputmode="numeric">
       <small>{{t "service.port.hint"}}</small></label>
-    <details class="more"><summary>{{t "field.env"}} · {{t "field.volumes"}}</summary><div class="form">
-      <label class="field"><span>{{t "field.env"}}</span><textarea class="input mono" name="env" rows="4">{{$f.Env}}</textarea></label>
+    <label class="field"><span>{{t "field.env"}}</span><textarea class="input mono" name="env" rows="5">{{$f.Env}}</textarea>
+      <small>{{t "env.hint.settings"}}</small></label>
+    <details class="more"><summary>{{t "field.volumes"}}</summary><div class="form">
       <label class="field"><span>{{t "field.volumes"}}</span><textarea class="input mono" name="volumes" rows="2">{{$f.Volumes}}</textarea></label>
     </div></details>
     {{end}}

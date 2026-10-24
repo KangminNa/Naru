@@ -33,6 +33,7 @@
 </header>
 <main class="page">
 {{if .OK}}<p class="flash ok" role="status">{{t .OK}}</p>{{end}}
+{{with .EnvFixes}}<p class="flash ok" role="status">{{t "env.fixed"}} {{range $i, $x := .}}{{if $i}} · {{end}}{{t (print "env.fix." $x.Kind) $x.Count}}{{end}}</p>{{end}}
 {{template "content" .}}
 </main>
 </body>
@@ -66,7 +67,7 @@
   {{else if .Link}}<a class="btn small" href="{{.Link}}">{{t .LinkKey}}</a>{{end}}
 </li>{{end}}
 
-{{define "error"}}{{if .Err}}<p class="flash bad" role="alert">{{t .Err}}</p>{{end}}{{end}}
+{{define "error"}}{{if .Err}}<p class="flash bad" role="alert">{{t .Err}}{{if .ErrLine}} {{t "err.line" .ErrLine}}{{end}}</p>{{end}}{{end}}
 
 {{define "steps"}}<ol class="steps">
   <li {{if eq .Data.Step 1}}aria-current="step"{{end}} {{if gt .Data.Step 1}}class="done"{{end}}><b>1</b>{{t "setup.step.account"}}</li>

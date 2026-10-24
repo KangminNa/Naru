@@ -287,6 +287,13 @@ type WebServerSync interface {
 	Status() model.WebServerStatus
 }
 
+// WebServerReach는 웹서버가 지도의 연결 대상 컨테이너에 닿게 한다.
+// 다른 사용자 정의 네트워크의 컨테이너면 웹서버를 그 네트워크에 붙이고, 이 실행에서 붙였다가 필요 없어진 네트워크는 뗀다.
+// 앱 네트워크에서는 떼지 않는다. 닿게 하지 못한 것은 돌려준다 — 그래도 설정 보내기는 막지 않는다.
+type WebServerReach interface {
+	Ensure(ctx context.Context, m model.SiteMap) []model.ReachProblem
+}
+
 // ConfigWriter는 사이트 지도를 웹서버 설정으로 쓴다.
 type ConfigWriter interface {
 	Write(m model.SiteMap) ([]byte, error)
@@ -375,6 +382,7 @@ type ServiceViewer interface {
 	Detail(ctx context.Context, id model.ServiceID) (model.ServiceView, error)
 	Deployment(ctx context.Context, id model.ServiceID, d model.DeploymentID) (model.DeploymentView, error)
 	Logs(ctx context.Context, id model.ServiceID, f model.LogFilter) (model.LogsView, error) // 앱 출력과 요청을 시간순으로
+	ContainerChoices(ctx context.Context) ([]string, error)                                  // 외부 연결 칸에 제안할 이 서버의 다른 컨테이너 ("이름:포트")
 }
 
 // ServerStats는 서버의 CPU·메모리·디스크를 알려준다.
@@ -457,6 +465,13 @@ type SiteFiles interface {
 // ContainerLogReader는 컨테이너가 찍은 최근 n줄을 시각과 함께 읽는다.
 type ContainerLogReader interface {
 	Recent(ctx context.Context, container string, n int) ([]model.LogLine, error)
+}
+
+// NetworkJoiner는 컨테이너가 붙은 네트워크를 알려주고, 컨테이너를 네트워크에 붙이고 뗀다.
+type NetworkJoiner interface {
+	NetworksOf(ctx context.Context, container string) ([]model.DockerNetwork, error) // 없는 컨테이너면 model.ErrNotFound
+	Join(ctx context.Context, network, container string) error                       // 이미 붙어 있으면 그대로
+	Leave(ctx context.Context, network, container string) error
 }
 
 // UsageReader는 컨테이너 하나의 CPU·메모리 사용량을 읽는다. 1초쯤 걸린다 — 지켜보기 고리에서만 부른다.

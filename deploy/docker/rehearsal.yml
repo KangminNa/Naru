@@ -41,12 +41,15 @@ services:
       - NARU_TLS=internal                           # 공개 CA에 요청하지 않는다
       - NARU_HTTPS_PORT=18443
       - NARU_SELF_UPSTREAM=naru-rehearsal:8080      # 웹서버가 이 화면에 닿는 이름
+      - NARU_CADDY_CONTAINER=naru-rehearsal-caddy   # 다른 네트워크의 컨테이너에 닿을 때 붙일 웹서버
     ports:
       - "127.0.0.1:18081:8080"
     volumes:
       - ${REHEARSAL_DATA:-../../rehearsal-data}:/data
       - caddy-admin:/run/caddy
       - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"         # 웹서버와 같은 길로 "이 서버"의 포트를 확인한다 (진단)
     networks: [apps]
 
 volumes:

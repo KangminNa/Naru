@@ -135,6 +135,7 @@
 |---|---|---|
 | `SiteMapBuilder` | 서비스·관리 주소·인증서 상태로 "주소마다 어디로 보낼지" 사이트 지도를 만든다 | `siteMapBuilder` |
 | `WebServerSync` | 사이트 지도를 웹서버에 맞춘다 — 바뀌었다는 알림을 받으면 바로, 평소엔 30초마다 | `webServerSync` |
+| `WebServerReach` | 웹서버가 지도의 연결 대상 컨테이너에 닿게 한다 — 외부 연결이 다른 사용자 정의 네트워크의 컨테이너(`이름:포트`)면 웹서버 컨테이너를 그 네트워크에 붙이고, 필요 없어진 네트워크(이 실행에서 붙인 것)는 뗀다. 앱 네트워크에서는 떼지 않는다. 기본 bridge에만 있는 컨테이너는 붙이지 않고 문제로 돌려준다 | `webServerReach` |
 | `ConfigWriter` | 사이트 지도를 웹서버 설정으로 쓴다 | `caddy.JSONWriter` |
 | `ConfigSender` | 설정을 웹서버에 보낸다 | `caddy.SocketSender`, 그것을 감싸 관리 소켓 설정이 빠졌는지 먼저 보는 `caddy.AdminSocketGuard` |
 | `CertificateReader` | 웹서버가 받아 둔 인증서를 읽는다 — 공개 인증서(`.crt`)만, 키는 열지 않는다. 사이트 지도는 이것으로 "HTTPS로 넘겨도 되는가"를 정한다 (불변식 4) | `caddy.CertificateFiles` |
@@ -143,7 +144,7 @@
 
 | 인터페이스 | 하는 일 | 구현 |
 |---|---|---|
-| `ServiceViewer` | 화면에 보여줄 서비스 모습(홈 카드·상세·배포 기록·로그)을 모은다. 비밀은 담지 않는다. 로그는 앱 출력과 받은 요청을 시간순으로 합친다 (M6-2) | `serviceViewer` |
+| `ServiceViewer` | 화면에 보여줄 서비스 모습(홈 카드·상세·배포 기록·로그, 외부 연결 칸에 제안할 이 서버의 다른 컨테이너)을 모은다. 비밀은 담지 않는다. 로그는 앱 출력과 받은 요청을 시간순으로 합친다 (M6-2) | `serviceViewer` |
 | `ServerStats` | 서버의 CPU·메모리·디스크를 알려준다 | `stats.ProcSampler` |
 
 ### I. 웹서버 설정 정하기 — `websettings` (M5)
@@ -171,6 +172,7 @@
 | `ContainerSwitch` | 컨테이너를 멈추고 켠다 | `docker.Containers` |
 | `ContainerWatcher` | 컨테이너 상태·로그, 이 서비스의 컨테이너 목록을 본다 | `docker.Containers` |
 | `ContainerLogReader` | 컨테이너가 찍은 최근 줄을 시각·stdout/stderr와 함께 읽는다 | `docker.Containers` |
+| `NetworkJoiner` | 컨테이너가 붙은 네트워크를 알려주고, 컨테이너를 네트워크에 붙이고 뗀다 (이미 붙어 있으면 그대로) | `docker.Containers` |
 | `UsageReader` | 컨테이너 하나의 CPU·메모리 사용량을 읽는다 (Docker stats 한 번 — 1초쯤 걸려 지켜보기 고리에서만 부른다) | `docker.Containers` |
 | `AccessLogReader` | 웹서버가 남긴 요청 기록 파일에서 그 주소들의 최근 요청을 읽는다 (파일 끝 4MB만) | `caddy.AccessLogFile` |
 | `AlertSender` | 알림 하나를 그 주소의 형식으로 보낸다 (10초 제한, 응답 본문은 읽고 버린다) | `httppost.AlertPoster` |
@@ -192,7 +194,7 @@
 | 인터페이스 | 하는 일 | 구현 |
 |---|---|---|
 | `HealthWatcher` | 마지막으로 본 것(멈춘 서비스·웹서버·Docker·찾은 문제·본 시각)을 알려준다. 도는 고리는 만들 때 함께 돌려준다 | `healthWatcher` |
-| `Diagnoser` | 서비스 하나의 문제와 고칠 방법을 찾는다 — 앱이 다른 포트를 들음, DNS가 이 서버를 가리키지 않음, 웹훅이 한 번도 오지 않음 (M6-3) | `diagnoser` |
+| `Diagnoser` | 서비스 하나의 문제와 고칠 방법을 찾는다 — 앱이 다른 포트를 들음, DNS가 이 서버를 가리키지 않음, 웹훅이 한 번도 오지 않음 (M6-3), 외부 연결이 이 서버의 포트에 닿지 않음·기본 bridge에만 있는 컨테이너 (2026-10-24, 진단만 — 알림은 보내지 않는다) | `diagnoser` |
 
 **알림 폭탄을 막는 규칙:** 두 번 연속(약 1분) 문제일 때만 멈춤으로 본다 · 직접 멈춘 서비스와 배포 중인 서비스는 보지 않는다 ·
 Naru가 막 켜졌을 때 이미 멈춰 있던 것은 알리지 않고 기준으로만 삼는다 · 인증서 곧 끝남은 주소마다 하루 한 번.
@@ -234,7 +236,8 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | | |
 |---|---|
 | Caddy → 앱 컨테이너 | `ContainerAliasDestination` — 서비스 별칭:포트. 새 컨테이너가 같은 별칭을 받으니 배포해도 설정이 그대로다 |
-| Caddy → "이 서버" | `host.docker.internal` (Caddy 컨테이너의 `host-gateway`) |
+| Caddy → "이 서버" | `host.docker.internal` (Caddy 컨테이너의 `host-gateway`). 이 서버의 포트가 127.0.0.1에만 열려 있으면 닿지 않는다 — Naru 컨테이너에도 같은 이름을 두어 같은 길로 확인하고, 닿지 않으면 진단이 이유를 말한다 |
+| Caddy → 다른 네트워크의 컨테이너 | 외부 연결에 `컨테이너이름:포트` — `WebServerReach`가 Caddy를 그 컨테이너의 사용자 정의 네트워크에 붙인다 (Caddy 컨테이너 이름은 `NARU_CADDY_CONTAINER`, 기본 `naru-caddy`) |
 | Caddy → 관리 화면 · Naru가 듣는 곳 | `naru:8080` · `:8080` (바깥에는 `127.0.0.1:8080`만) |
 | 정적 사이트 · 인증서 저장소 | `/srv/sites` · Caddy의 `/data` (공유 볼륨 — Naru는 읽기만) |
 | 관리 소켓 | Caddy와 Naru만 마운트하는 볼륨의 `/run/caddy/admin.sock` |
@@ -334,7 +337,8 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `Destination` | 요청을 보낼 곳 — 컨테이너:포트 / 폴더 / 외부 주소 |
 | `Site` | 사이트 지도의 한 줄 — 주소들, 목적지, HTTPS, HSTS, HTTP를 HTTPS로 넘기는지(`RedirectHTTP` — 인증서가 있을 때만) |
 | `SiteMap` | 웹서버에 줄 지도 — 사이트들, 관리 주소(와 그 넘기기), 관리 소켓, 모르는 주소 처리, 바깥 HTTPS 포트 |
-| `WebServerStatus` | 웹서버에 닿는지, 마지막 오류, 마지막으로 맞춘 때 |
+| `WebServerStatus` | 웹서버에 닿는지, 마지막 오류, 마지막으로 맞춘 때, 닿게 하지 못한 연결 대상 |
+| `DockerNetwork` · `ReachProblem` | 컨테이너가 붙은 네트워크 하나(사용자 정의인지 — 이름 풀이가 되는지) · 웹서버가 닿게 하지 못한 연결 대상 하나(컨테이너 이름, 왜: 기본 bridge에만 있음 · Docker에 닿지 못함) |
 | `Certificate` · `Certificates` | 웹서버가 받아 둔 인증서 하나(덮는 이름·발급자·기간) · 전부. `Certificates.For(도메인, 지금)`이 그 도메인의 상태를 찾는다 (와일드카드는 한 단계) |
 | `CertificateState` | 도메인 하나의 인증서 상태 — 있음(만료일·발급자) · 아직 없음. `Usable`이면 HTTP를 HTTPS로 넘긴다, `EndsSoon`은 남은 기간이 수명의 1/6 미만 (웹서버는 1/3 남으면 갱신하니 그 안이면 갱신이 막힌 것). 실패 이유는 M4-2 |
 | `DNSAnswer` | 도메인이 이 서버를 가리키는지의 답 |
@@ -685,6 +689,13 @@ type WebServerSync interface {
 	Status() model.WebServerStatus
 }
 
+// WebServerReach는 웹서버가 지도의 연결 대상 컨테이너에 닿게 한다.
+// 다른 사용자 정의 네트워크의 컨테이너면 웹서버를 그 네트워크에 붙이고, 이 실행에서 붙였다가 필요 없어진 네트워크는 뗀다.
+// 앱 네트워크에서는 떼지 않는다. 닿게 하지 못한 것은 돌려준다 — 그래도 설정 보내기는 막지 않는다.
+type WebServerReach interface {
+	Ensure(ctx context.Context, m model.SiteMap) []model.ReachProblem
+}
+
 // ConfigWriter는 사이트 지도를 웹서버 설정으로 쓴다.
 type ConfigWriter interface {
 	Write(m model.SiteMap) ([]byte, error)
@@ -773,6 +784,7 @@ type ServiceViewer interface {
 	Detail(ctx context.Context, id model.ServiceID) (model.ServiceView, error)
 	Deployment(ctx context.Context, id model.ServiceID, d model.DeploymentID) (model.DeploymentView, error)
 	Logs(ctx context.Context, id model.ServiceID, f model.LogFilter) (model.LogsView, error) // 앱 출력과 요청을 시간순으로
+	ContainerChoices(ctx context.Context) ([]string, error)                                  // 외부 연결 칸에 제안할 이 서버의 다른 컨테이너 ("이름:포트")
 }
 
 // ServerStats는 서버의 CPU·메모리·디스크를 알려준다.
@@ -857,6 +869,13 @@ type ContainerLogReader interface {
 	Recent(ctx context.Context, container string, n int) ([]model.LogLine, error)
 }
 
+// NetworkJoiner는 컨테이너가 붙은 네트워크를 알려주고, 컨테이너를 네트워크에 붙이고 뗀다.
+type NetworkJoiner interface {
+	NetworksOf(ctx context.Context, container string) ([]model.DockerNetwork, error) // 없는 컨테이너면 model.ErrNotFound
+	Join(ctx context.Context, network, container string) error                       // 이미 붙어 있으면 그대로
+	Leave(ctx context.Context, network, container string) error
+}
+
 // UsageReader는 컨테이너 하나의 CPU·메모리 사용량을 읽는다. 1초쯤 걸린다 — 지켜보기 고리에서만 부른다.
 type UsageReader interface {
 	Usage(ctx context.Context, container string) (model.ResourceUsage, error)
@@ -935,11 +954,12 @@ type RandomTokens interface {
 | `oldVersionCleaner` | DeployHistoryReader · ImageCleaner · SiteFiles |
 | `hookReceiver` | ServiceReader · SecretStore · SignatureChecker(차례로) · BranchFilter · Deployer · HookLogStore · Clock |
 | `siteMapBuilder` | ServiceReader · KindLookup · AdminDomainSetting · CertEmailSetting · SetupProgress · CertificateReader · Clock · WebSettingsStore |
-| `webServerSync` | SiteMapBuilder · ConfigWriter · ConfigSender(`AdminSocketGuard`로 감싼 것) · EventSubscriber |
+| `webServerSync` | SiteMapBuilder · ConfigWriter · ConfigSender(`AdminSocketGuard`로 감싼 것) · WebServerReach · EventSubscriber |
+| `webServerReach` | NetworkJoiner (+ 웹서버 컨테이너 이름·앱 네트워크 이름은 만들 때 받는다) |
 | `serviceViewer` | ServiceReader · SecretStore · DeployHistoryReader · ContainerWatcher · KindLookup · AdminDomainSetting · Deployer · CertificateReader · Clock · WebSettingsStore · ContainerLogReader · AccessLogReader · HealthWatcher |
 | `webSettingsEditor` | ServiceReader · WebSettingsStore · SnippetCompiler · LoginHasher · WebServerSync |
 | `healthWatcher` | ServiceReader · KindLookup · ContainerWatcher · PortChecker · Deployer · WebServerSync · CertificateReader · AdminDomainSetting · Diagnoser · UsageReader · Clock · EventPublisher |
-| `diagnoser` | KindLookup · PortChecker · DNSChecker · AdminDomainSetting · CertificateReader · Clock (+ `NARU_PUBLIC_IP` 값은 만들 때 받는다) |
+| `diagnoser` | KindLookup · PortChecker · DNSChecker · AdminDomainSetting · CertificateReader · WebServerSync · Clock (+ `NARU_PUBLIC_IP` 값은 만들 때 받는다) |
 | `alerts` | ChannelStore · DeliveryLog · AlertSender · ServiceReader · EventSubscriber · Clock |
 | `web` | LoginManager · AccountManager · SetupKey · AdminDomainSetting · CertEmailSetting · SetupProgress · ServiceLauncher · ServiceEditor · ServiceViewer · Deployer · ServiceControl · HookReceiver · ServerStats · WebServerSync · DNSChecker · CertificateReader · Clock · WebSettingsEditor · NginxTranslator · AlertSettings |
 

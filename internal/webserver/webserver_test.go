@@ -204,7 +204,7 @@ func TestSyncSendsOnceAndThenOnlyChecks(t *testing.T) {
 	b := &fakeBuilder{m: model.SiteMap{AdminSocket: "/run/caddy/admin.sock", AdminUpstream: "naru:8080",
 		Sites: []model.Site{{Hosts: []string{"blog.example.com"}, Destination: model.Destination{Address: "shelf-blog:3000"}}}}}
 	sender := &fakeSender{}
-	s, _ := NewWebServerSync(b, caddy.JSONWriter{}, sender, events.NewBus(), quiet)
+	s, _ := NewWebServerSync(b, caddy.JSONWriter{}, sender, noReach{}, events.NewBus(), quiet)
 
 	if err := s.SyncNow(ctx); err != nil {
 		t.Fatal(err)
@@ -225,7 +225,7 @@ func TestSyncSendsOnceAndThenOnlyChecks(t *testing.T) {
 
 func TestSyncReportsRefusalAndRetries(t *testing.T) {
 	sender := &fakeSender{fail: errors.New("caddy: POST /load: 400 loading config: bad")}
-	s, _ := NewWebServerSync(&fakeBuilder{m: model.SiteMap{AdminSocket: "/s", AdminUpstream: "naru:8080"}}, caddy.JSONWriter{}, sender, events.NewBus(), quiet)
+	s, _ := NewWebServerSync(&fakeBuilder{m: model.SiteMap{AdminSocket: "/s", AdminUpstream: "naru:8080"}}, caddy.JSONWriter{}, sender, noReach{}, events.NewBus(), quiet)
 	if err := s.SyncNow(ctx); err == nil {
 		t.Fatal("a refused config is an error")
 	}
@@ -237,7 +237,7 @@ func TestSyncReportsRefusalAndRetries(t *testing.T) {
 		t.Fatal("after a failure the next sync sends again")
 	}
 
-	broken, _ := NewWebServerSync(&fakeBuilder{err: errors.New("db gone")}, caddy.JSONWriter{}, &fakeSender{}, events.NewBus(), quiet)
+	broken, _ := NewWebServerSync(&fakeBuilder{err: errors.New("db gone")}, caddy.JSONWriter{}, &fakeSender{}, noReach{}, events.NewBus(), quiet)
 	if broken.SyncNow(ctx) == nil || !strings.Contains(broken.Status().LastError, "db gone") {
 		t.Fatal("build errors surface in the status")
 	}
@@ -247,7 +247,7 @@ func TestAChangeIsSyncedRightAway(t *testing.T) {
 	bus := events.NewBus()
 	sender := &fakeSender{}
 	b := &fakeBuilder{m: model.SiteMap{AdminSocket: "/s", AdminUpstream: "naru:8080"}}
-	_, run := NewWebServerSync(b, caddy.JSONWriter{}, sender, bus, quiet)
+	_, run := NewWebServerSync(b, caddy.JSONWriter{}, sender, noReach{}, bus, quiet)
 	c, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go run(c)
@@ -262,5 +262,34 @@ func TestAChangeIsSyncedRightAway(t *testing.T) {
 	wait(2)
 	if sender.count() != 2 {
 		t.Fatalf("a SiteMapChanged event is applied without waiting 30s: %d loads", sender.count())
+	}
+}
+
+type noReach struct{}
+
+func (noReach) Ensure(context.Context, model.SiteMap) []model.ReachProblem { return nil }
+
+type countingReach struct {
+	calls    int
+	problems []model.ReachProblem
+}
+
+func (c *countingReach) Ensure(context.Context, model.SiteMap) []model.ReachProblem {
+	c.calls++
+	return c.problems
+}
+
+// 보내기 전에 늘 닿게 해 본다 — 설정이 같아도 (웹서버 컨테이너가 새로 만들어졌을 수 있다). 닿지 못한 것이 있어도 보낸다.
+func TestSyncKeepsTheWebServerReachingItsTargets(t *testing.T) {
+	reach := &countingReach{problems: []model.ReachProblem{{Host: "legacy", Why: "defaultbridge"}}}
+	sender := &fakeSender{}
+	s, _ := NewWebServerSync(&fakeBuilder{m: model.SiteMap{AdminSocket: "/s", AdminUpstream: "naru:8080"}}, caddy.JSONWriter{}, sender, reach, events.NewBus(), quiet)
+	s.SyncNow(ctx)
+	s.SyncNow(ctx)
+	if reach.calls != 2 || len(sender.loads) != 1 {
+		t.Fatalf("reach every time, send once: reach=%d loads=%d", reach.calls, len(sender.loads))
+	}
+	if st := s.Status(); !st.Connected || len(st.Unreachable) != 1 || st.Unreachable[0].Host != "legacy" {
+		t.Fatalf("%+v", st)
 	}
 }

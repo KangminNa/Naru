@@ -2,6 +2,9 @@ package docker
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -201,5 +204,56 @@ func TestUsage(t *testing.T) {
 	}
 	if _, err := NewContainers(New(sock)).Usage(context.Background(), "nope"); err == nil {
 		t.Fatal("unknown container")
+	}
+}
+
+// 웹서버 컨테이너를 다른 네트워크에 붙이고 떼기 — 이미 붙어 있거나 이미 떨어져 있으면 그대로 괜찮다.
+func TestNetworks(t *testing.T) {
+	var calls []string
+	sock := fakeDocker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		calls = append(calls, r.Method+" "+r.URL.Path+" "+strings.TrimSpace(string(body)))
+		switch {
+		case r.URL.Path == "/containers/couchdb/json":
+			w.Write([]byte(`{"NetworkSettings":{"Networks":{"bridge":{},"db_default":{}}}}`))
+		case r.URL.Path == "/containers/nas.local/json":
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"message":"No such container: nas.local"}`))
+		case r.URL.Path == "/networks/db_default/connect" && strings.Contains(string(body), "naru-caddy"):
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/networks/other/connect":
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"message":"endpoint with name naru-caddy already exists in network other"}`))
+		case r.URL.Path == "/networks/gone/disconnect":
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"message":"container 3f2 is not connected to network gone"}`))
+		case strings.HasSuffix(r.URL.Path, "/disconnect"):
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	c := NewContainers(New(sock))
+	nets, err := c.NetworksOf(context.Background(), "couchdb")
+	if err != nil || fmt.Sprint(nets) != "[{bridge false} {db_default true}]" {
+		t.Fatalf("%v %v", nets, err)
+	}
+	if _, err := c.NetworksOf(context.Background(), "nas.local"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("not a container: %v", err)
+	}
+	if err := c.Join(context.Background(), "db_default", "naru-caddy"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(calls, "\n"), `POST /networks/db_default/connect {"Container":"naru-caddy"}`) {
+		t.Fatalf("%v", calls)
+	}
+	if err := c.Join(context.Background(), "other", "naru-caddy"); err != nil {
+		t.Fatalf("already joined is fine: %v", err)
+	}
+	if err := c.Leave(context.Background(), "db_default", "naru-caddy"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Leave(context.Background(), "gone", "naru-caddy"); err != nil {
+		t.Fatalf("already left is fine: %v", err)
 	}
 }

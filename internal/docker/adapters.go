@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/KangminNa/naru/internal/model"
@@ -136,6 +139,40 @@ func (k Containers) Logs(ctx context.Context, name string, lines int) (string, e
 // Recent는 컨테이너가 찍은 최근 n줄이다 (ContainerLogReader).
 func (k Containers) Recent(ctx context.Context, name string, n int) ([]model.LogLine, error) {
 	return k.c.logLines(ctx, name, n)
+}
+
+// NetworksOf는 컨테이너가 붙은 네트워크다 (NetworkJoiner). 없는 컨테이너면 model.ErrNotFound.
+func (k Containers) NetworksOf(ctx context.Context, name string) ([]model.DockerNetwork, error) {
+	names, err := k.c.networksOf(ctx, name)
+	if errors.Is(err, ErrNotFound) {
+		return nil, model.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]model.DockerNetwork, 0, len(names))
+	for _, n := range names {
+		out = append(out, model.DockerNetwork{Name: n, UserDefined: n != "bridge" && n != "host" && n != "none"})
+	}
+	return out, nil
+}
+
+// Join은 컨테이너를 네트워크에 붙인다. 이미 붙어 있으면 그대로 괜찮다.
+func (k Containers) Join(ctx context.Context, network, name string) error {
+	err := k.c.call(ctx, http.MethodPost, "/networks/"+url.PathEscape(network)+"/connect", map[string]string{"Container": name}, nil)
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		return nil
+	}
+	return err
+}
+
+// Leave는 컨테이너를 네트워크에서 뗀다. 이미 떨어져 있으면 그대로 괜찮다.
+func (k Containers) Leave(ctx context.Context, network, name string) error {
+	err := k.c.call(ctx, http.MethodPost, "/networks/"+url.PathEscape(network)+"/disconnect", map[string]string{"Container": name}, nil)
+	if err != nil && strings.Contains(err.Error(), "is not connected") {
+		return nil
+	}
+	return err
 }
 
 // Usage는 컨테이너 하나의 CPU·메모리다 (UsageReader).

@@ -44,7 +44,7 @@ Paste an nginx config and it is turned into those fields. Applying checks agains
 | Repository | Builds the repo's `Dockerfile` into a container. Build path for monorepos. Port from `EXPOSE` |
 | Image | Pulls an image from Docker Hub or GHCR into a container |
 | Static site | Serves a repo folder straight from the web server, no container. Hidden files (`.env`, `.github`…) are never published |
-| External | Just an address for something already running (NAS, router, a program on the host). `localhost` means this server |
+| External | Just an address for something already running (NAS, router, a program on the host). `localhost` means this server. Another container on this server is `name:port` — if it sits on another compose network, the web server joins that network by itself |
 
 **Deploys**
 

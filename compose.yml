@@ -46,6 +46,8 @@ services:
       - ./data-v2:/data
       - caddy-admin:/run/caddy
       - /var/run/docker.sock:/var/run/docker.sock    # 컨테이너 상태 — 관리자는 설계상 root와 같다
+    extra_hosts:
+      - "host.docker.internal:host-gateway"         # 웹서버와 같은 길로 "이 서버"의 포트를 확인한다 (진단)
     networks: [apps]
 
 volumes:

@@ -176,7 +176,9 @@
     <label class="field"><span>{{t "field.folder"}}</span><input class="input mono" name="folder" value="{{$f.Folder}}"></label>
     {{end}}
     {{if eq (print $s.Kind) "external"}}
-    <label class="field"><span>{{t "field.upstream"}}</span><input class="input mono" name="upstream" value="{{$f.Upstream}}" required></label>
+    <label class="field"><span>{{t "field.upstream"}}</span><input class="input mono" name="upstream" value="{{$f.Upstream}}" required list="naru-containers">
+      {{with $.Data.Containers}}<datalist id="naru-containers">{{range .}}<option value="{{.}}">{{end}}</datalist>{{end}}
+      <small>{{t "new.external.hint"}}</small></label>
     {{end}}
     {{if $.Data.Container}}
     <label class="field"><span>{{t "service.port"}}</span><input class="input mono" name="port" value="{{if $f.Port}}{{$f.Port}}{{end}}" inputmode="numeric">

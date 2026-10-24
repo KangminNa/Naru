@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"net"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,6 +22,9 @@ type DiagnoserParts struct {
 	Certs    contract.CertificateReader
 	Clock    contract.Clock
 	PublicIP string // NARU_PUBLIC_IP — 비면 관리 주소를 조회한 IP를 이 서버의 IP로 본다
+
+	WebServer  contract.WebServerSync // 웹서버가 닿게 하지 못한 연결 대상 (Status().Unreachable)
+	AppNetwork string                 // 앱 네트워크 이름 — 안내 문구에 넣는다
 }
 
 const (
@@ -68,6 +72,10 @@ func (d *diagnoser) Diagnose(ctx context.Context, s model.Service, states model.
 		if f, ok := d.wrongPort(ctx, s, states); ok {
 			add(f)
 		}
+	} else if s.External != "" {
+		if f, ok := d.unreachableExternal(ctx, s.External); ok {
+			add(f)
+		}
 	}
 	for _, f := range d.dnsFindings(ctx, s) {
 		add(f)
@@ -106,6 +114,47 @@ func (d *diagnoser) wrongPort(ctx context.Context, s model.Service, states model
 		}
 	}
 	return model.Finding{}, false
+}
+
+// unreachableExternal은 외부 연결 대상에 웹서버가 닿지 못하는 까닭을 찾는다 — 진단만 하고 알리지는 않는다 (M6: 외부 연결은 감시하지 않는다).
+//   - "이 서버"의 포트: Naru도 웹서버와 같은 길(host.docker.internal)로 연결해 본다. 127.0.0.1에만 열린 포트는 이 길로 닿지 않는다.
+//   - 다른 컨테이너: 웹서버가 닿게 하지 못했다고 맞추기가 알려 온 것(기본 bridge·host 네트워크에만 있음).
+//
+// 그 밖의 바깥 주소(NAS 등)는 찔러 보지 않는다.
+func (d *diagnoser) unreachableExternal(ctx context.Context, external string) (model.Finding, bool) {
+	host, port, err := net.SplitHostPort(strings.TrimPrefix(external, "https://"))
+	if err != nil {
+		return model.Finding{}, false
+	}
+	if host == "host.docker.internal" {
+		p, err := model.ParsePort(port)
+		if err != nil || p == 0 {
+			return model.Finding{}, false
+		}
+		actx, cancel := context.WithTimeout(ctx, answerAfter)
+		defer cancel()
+		if d.p.Ports.Answers(actx, host, p) != nil {
+			return model.Finding{Key: "find.hostport", Level: model.FindingUrgent, Args: []string{port, d.bridgeIP(ctx)}}, true
+		}
+		return model.Finding{}, false
+	}
+	for _, pr := range d.p.WebServer.Status().Unreachable {
+		if pr.Host == host && pr.Why == "defaultbridge" {
+			return model.Finding{Key: "find.bridge", Level: model.FindingUrgent, Args: []string{host, d.p.AppNetwork}}, true
+		}
+	}
+	return model.Finding{}, false
+}
+
+// bridgeIP는 컨테이너에서 본 "이 서버"의 주소(Docker 브리지 IP)다 — 서버마다 다르다 (172.17.0.1, 172.18.0.1 …).
+// 포트를 이 IP에 열면 컨테이너에서는 닿고 바깥에는 열리지 않는다. 조회하지 못하면 흔한 값을 쓴다.
+func (d *diagnoser) bridgeIP(ctx context.Context) string {
+	if name, err := model.ParseDomainName("host.docker.internal"); err == nil {
+		if ips := d.lookup(ctx, name, d.p.Clock.Now()).IPs; len(ips) > 0 {
+			return ips[0]
+		}
+	}
+	return "172.17.0.1"
 }
 
 // dnsFindings는 서비스 주소가 이 서버를 가리키는지 본다. 이 서버의 IP를 모르면 보지 않는다.

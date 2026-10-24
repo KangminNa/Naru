@@ -44,44 +44,55 @@ import (
 // Config는 환경 변수에서 읽는다. 모두 비워 둬도 돈다 — 나머지는 첫 설정 화면에서 정한다.
 // 비워 둔 값은 Docker 구성(deploy/docker)에 맞는 기본값으로 채운다 (resolved). 환경 변수를 읽는 곳은 이 패키지와 cmd뿐이다 (R12).
 type Config struct {
-	Listen       string // NARU_LISTEN, 기본 :8080 (compose가 바깥에는 127.0.0.1:8080만 연다)
-	DataDir      string // NARU_DATA_DIR, 기본 ./data
-	ProcDir      string // NARU_PROC_DIR, 기본 /proc
-	DockerSocket string // NARU_DOCKER_SOCKET, 기본 /var/run/docker.sock
-	CaddySocket  string // NARU_CADDY_ADMIN — 웹서버 관리 소켓, 기본 /run/caddy/admin.sock
-	SelfUpstream string // NARU_SELF_UPSTREAM — 웹서버가 관리 화면에 닿는 주소, 기본 naru:8080
-	InternalTLS  bool   // NARU_TLS=internal — 개발용. 공개 CA 대신 내부 CA로 인증서
-	Network      string // NARU_NETWORK — 앱 컨테이너가 붙는 Docker 네트워크, 기본 naru-net (없으면 만든다)
-	CaddySites   string // NARU_CADDY_SITES — 웹서버가 본 정적 사이트 폴더, 기본 /srv/sites
-	CaddyCerts   string // NARU_CADDY_CERTS — 웹서버가 받은 인증서(Naru는 읽기만), 기본 <데이터>/caddy/data/caddy/certificates
-	HTTPSPort    int    // NARU_HTTPS_PORT — 바깥에서 본 HTTPS 포트, 기본 443 (로컬처럼 다른 포트로 열었을 때만)
-	PublicIP     string // NARU_PUBLIC_IP — 이 서버의 공인 IP. 비면 관리 주소를 조회해 추정한다 (DNS 진단에만 쓴다)
-	AdminDomain  string // ADMIN_DOMAIN — 있으면 화면 설정보다 우선
-	ACMEEmail    string // ACME_EMAIL — 있으면 화면 설정보다 우선
-	Version      string
+	Listen         string // NARU_LISTEN, 기본 :8080 (compose가 바깥에는 127.0.0.1:8080만 연다)
+	DataDir        string // NARU_DATA_DIR, 기본 ./data
+	ProcDir        string // NARU_PROC_DIR, 기본 /proc
+	DockerSocket   string // NARU_DOCKER_SOCKET, 기본 /var/run/docker.sock
+	CaddySocket    string // NARU_CADDY_ADMIN — 웹서버 관리 소켓, 기본 /run/caddy/admin.sock
+	SelfUpstream   string // NARU_SELF_UPSTREAM — 웹서버가 관리 화면에 닿는 주소, 기본 naru:8080
+	InternalTLS    bool   // NARU_TLS=internal — 개발용. 공개 CA 대신 내부 CA로 인증서
+	Network        string // NARU_NETWORK — 앱 컨테이너가 붙는 Docker 네트워크, 기본 naru-net (없으면 만든다)
+	CaddySites     string // NARU_CADDY_SITES — 웹서버가 본 정적 사이트 폴더, 기본 /srv/sites
+	CaddyContainer string // NARU_CADDY_CONTAINER — 웹서버 컨테이너 이름, 기본 naru-caddy (다른 네트워크의 컨테이너에 닿게 그 네트워크에 붙인다)
+	CaddyCerts     string // NARU_CADDY_CERTS — 웹서버가 받은 인증서(Naru는 읽기만), 기본 <데이터>/caddy/data/caddy/certificates
+	HTTPSPort      int    // NARU_HTTPS_PORT — 바깥에서 본 HTTPS 포트, 기본 443 (로컬처럼 다른 포트로 열었을 때만)
+	PublicIP       string // NARU_PUBLIC_IP — 이 서버의 공인 IP. 비면 관리 주소를 조회해 추정한다 (DNS 진단에만 쓴다)
+	AdminDomain    string // ADMIN_DOMAIN — 있으면 화면 설정보다 우선
+	ACMEEmail      string // ACME_EMAIL — 있으면 화면 설정보다 우선
+	Version        string
 
 	install string // NARU_INSTALL — 지운 설치형(host)으로 켜려는 것을 알아보려고만 읽는다
 }
 
 func ConfigFromEnv(version string) Config {
 	return Config{
-		Listen:       os.Getenv("NARU_LISTEN"),
-		DataDir:      envOr("NARU_DATA_DIR", "./data"),
-		ProcDir:      envOr("NARU_PROC_DIR", "/proc"),
-		DockerSocket: envOr("NARU_DOCKER_SOCKET", "/var/run/docker.sock"),
-		CaddySocket:  os.Getenv("NARU_CADDY_ADMIN"),
-		SelfUpstream: os.Getenv("NARU_SELF_UPSTREAM"),
-		InternalTLS:  os.Getenv("NARU_TLS") == "internal",
-		Network:      envOr("NARU_NETWORK", "naru-net"),
-		CaddySites:   os.Getenv("NARU_CADDY_SITES"),
-		CaddyCerts:   os.Getenv("NARU_CADDY_CERTS"),
-		HTTPSPort:    envPort("NARU_HTTPS_PORT", 443),
-		PublicIP:     os.Getenv("NARU_PUBLIC_IP"),
-		AdminDomain:  os.Getenv("ADMIN_DOMAIN"),
-		ACMEEmail:    os.Getenv("ACME_EMAIL"),
-		Version:      version,
-		install:      os.Getenv("NARU_INSTALL"),
+		Listen:         os.Getenv("NARU_LISTEN"),
+		DataDir:        envOr("NARU_DATA_DIR", "./data"),
+		ProcDir:        envOr("NARU_PROC_DIR", "/proc"),
+		DockerSocket:   envOr("NARU_DOCKER_SOCKET", "/var/run/docker.sock"),
+		CaddySocket:    os.Getenv("NARU_CADDY_ADMIN"),
+		SelfUpstream:   os.Getenv("NARU_SELF_UPSTREAM"),
+		InternalTLS:    os.Getenv("NARU_TLS") == "internal",
+		Network:        envOr("NARU_NETWORK", "naru-net"),
+		CaddySites:     os.Getenv("NARU_CADDY_SITES"),
+		CaddyCerts:     os.Getenv("NARU_CADDY_CERTS"),
+		CaddyContainer: os.Getenv("NARU_CADDY_CONTAINER"),
+		HTTPSPort:      envPort("NARU_HTTPS_PORT", 443),
+		PublicIP:       os.Getenv("NARU_PUBLIC_IP"),
+		AdminDomain:    os.Getenv("ADMIN_DOMAIN"),
+		ACMEEmail:      os.Getenv("ACME_EMAIL"),
+		Version:        version,
+		install:        os.Getenv("NARU_INSTALL"),
 	}
+}
+
+// selfHost는 웹서버가 관리 화면에 닿는 주소의 호스트다 — Docker 구성에서는 Naru 컨테이너 이름(naru).
+func selfHost(upstream string) string {
+	host, _, err := net.SplitHostPort(upstream)
+	if err != nil {
+		return upstream
+	}
+	return host
 }
 
 // 웹서버(Caddy 컨테이너)가 쓰는 접근 로그 경로 — 웹서버 컨테이너의 /data는 Naru의 <데이터>/caddy/data다.
@@ -111,6 +122,7 @@ func (c Config) resolved() (Config, error) {
 	fill(&c.CaddySocket, "/run/caddy/admin.sock")
 	fill(&c.SelfUpstream, "naru:8080")
 	fill(&c.CaddySites, "/srv/sites")
+	fill(&c.CaddyContainer, "naru-caddy")
 	fill(&c.CaddyCerts, filepath.Join(c.DataDir, "caddy", "data", "caddy", "certificates"))
 	if c.PublicIP != "" {
 		ip := net.ParseIP(c.PublicIP)
@@ -138,24 +150,25 @@ func envOr(key, fallback string) string {
 
 // Outside는 바깥 세계(Docker·git·네트워크·웹서버·/proc)에 닿는 도구다. 테스트는 가짜로 바꿔 끼운다.
 type Outside struct {
-	Builder contract.ImageBuilder
-	Puller  contract.ImagePuller
-	Images  contract.ImageCleaner
-	Starter contract.ContainerStarter
-	Remover contract.ContainerRemover
-	Switch  contract.ContainerSwitch
-	Watcher contract.ContainerWatcher
-	Code    contract.CodeDownloader
-	Ports   contract.PortChecker
-	DNS     contract.DNSChecker
-	Stats   contract.ServerStats
-	Sender  contract.ConfigSender // 관리 소켓 확인(AdminSocketGuard)은 app이 늘 감싼다
-	Certs   contract.CertificateReader
-	Snippet contract.SnippetCompiler // 고급 칸의 Caddyfile을 바꿔 준다 (Caddy 관리 소켓)
-	Alerts  contract.AlertSender     // 알림을 보낸다 (HTTP)
-	AppLogs contract.ContainerLogReader
-	Access  contract.AccessLogReader // 비면 데이터 폴더의 웹서버 접근 로그를 읽는다
-	Usage   contract.UsageReader     // 컨테이너 CPU·메모리 (Docker stats)
+	Builder  contract.ImageBuilder
+	Puller   contract.ImagePuller
+	Images   contract.ImageCleaner
+	Starter  contract.ContainerStarter
+	Remover  contract.ContainerRemover
+	Switch   contract.ContainerSwitch
+	Watcher  contract.ContainerWatcher
+	Code     contract.CodeDownloader
+	Ports    contract.PortChecker
+	DNS      contract.DNSChecker
+	Stats    contract.ServerStats
+	Sender   contract.ConfigSender // 관리 소켓 확인(AdminSocketGuard)은 app이 늘 감싼다
+	Certs    contract.CertificateReader
+	Snippet  contract.SnippetCompiler // 고급 칸의 Caddyfile을 바꿔 준다 (Caddy 관리 소켓)
+	Alerts   contract.AlertSender     // 알림을 보낸다 (HTTP)
+	AppLogs  contract.ContainerLogReader
+	Access   contract.AccessLogReader // 비면 데이터 폴더의 웹서버 접근 로그를 읽는다
+	Usage    contract.UsageReader     // 컨테이너 CPU·메모리 (Docker stats)
+	Networks contract.NetworkJoiner   // 웹서버 컨테이너를 다른 네트워크에 붙이고 뗀다
 
 	WatchEvery time.Duration // 지켜보는 간격 (0이면 30초)
 	Clock      contract.Clock
@@ -171,7 +184,7 @@ func RealOutside(cfg Config) Outside {
 	containers := docker.NewContainers(d)
 	return Outside{
 		Builder: docker.NewBuilder(d), Puller: docker.NewPuller(d), Images: docker.NewImages(d),
-		Starter: containers, Remover: containers, Switch: containers, Watcher: containers, AppLogs: containers, Usage: containers,
+		Starter: containers, Remover: containers, Switch: containers, Watcher: containers, AppLogs: containers, Usage: containers, Networks: containers,
 		Code: git.Downloader{}, Ports: netcheck.TCP{}, DNS: netcheck.NewDNS(nil),
 		Stats:   stats.NewProcSampler(cfg.ProcDir, cfg.DataDir),
 		Sender:  caddy.NewSocketSender(cfg.CaddySocket),
@@ -297,7 +310,8 @@ func (a *App) assemble() error {
 		AdminSocket: cfg.CaddySocket, AdminUpstream: cfg.SelfUpstream, InternalTLS: cfg.InternalTLS, HTTPSPort: cfg.HTTPSPort,
 		AccessLog: accessLogInCaddy,
 	}, serviceStore, lookup, webserver.Settings{Admin: adminDomain, Email: certEmail, Setup: setup}, out.Certs, out.Clock, webStore)
-	sync, run := webserver.NewWebServerSync(siteMap, caddy.JSONWriter{}, caddy.NewAdminSocketGuard(out.Sender, cfg.CaddySocket), bus, a.log)
+	reach := webserver.NewWebServerReach(out.Networks, cfg.CaddyContainer, cfg.Network, a.log)
+	sync, run := webserver.NewWebServerSync(siteMap, caddy.JSONWriter{}, caddy.NewAdminSocketGuard(out.Sender, cfg.CaddySocket), reach, bus, a.log)
 	a.syncWS = run
 
 	// E. 배포
@@ -336,6 +350,7 @@ func (a *App) assemble() error {
 	})
 	diagnoser := watch.NewDiagnoser(watch.DiagnoserParts{
 		Kinds: lookup, Ports: out.Ports, DNS: out.DNS, Admin: adminDomain, Certs: out.Certs, Clock: out.Clock, PublicIP: cfg.PublicIP,
+		WebServer: sync, AppNetwork: cfg.Network,
 	})
 	watcher, runWatch := watch.NewHealthWatcher(watch.Parts{
 		Services: serviceStore, Kinds: lookup, Containers: out.Watcher, Ports: out.Ports, Deployer: deployer,
@@ -347,7 +362,7 @@ func (a *App) assemble() error {
 	viewer := views.NewServiceViewer(views.Parts{
 		Services: serviceStore, Secrets: secrets, History: history, Containers: out.Watcher, Kinds: lookup,
 		Admin: adminDomain, Deployer: deployer, Certs: out.Certs, Clock: out.Clock, HTTPSPort: cfg.HTTPSPort, Web: webStore,
-		AppLogs: out.AppLogs, Access: out.Access, Watch: watcher,
+		AppLogs: out.AppLogs, Access: out.Access, Watch: watcher, Hide: []string{cfg.CaddyContainer, selfHost(cfg.SelfUpstream)},
 	}, a.log)
 
 	srv, err := web.New(web.Deps{

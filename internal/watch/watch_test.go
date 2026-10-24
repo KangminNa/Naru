@@ -81,14 +81,17 @@ func (f *fakeDeployer) RollBack(context.Context, model.ServiceID, model.Deployme
 }
 func (f *fakeDeployer) IsDeploying(id model.ServiceID) bool { return f.busy[id] }
 
-type fakeWebServer struct{ up bool }
+type fakeWebServer struct {
+	up          bool
+	unreachable []model.ReachProblem
+}
 
 func (f *fakeWebServer) SyncNow(context.Context) error { return nil }
 func (f *fakeWebServer) Status() model.WebServerStatus {
 	if f.up {
-		return model.WebServerStatus{Connected: true}
+		return model.WebServerStatus{Connected: true, Unreachable: f.unreachable}
 	}
-	return model.WebServerStatus{LastError: "caddy: dial unix: no such file"}
+	return model.WebServerStatus{LastError: "caddy: dial unix: no such file", Unreachable: f.unreachable}
 }
 
 type fakeCerts struct{ list model.Certificates }
@@ -157,9 +160,10 @@ func newRig() *rig {
 	w, _ := NewHealthWatcher(Parts{
 		Services: r.services, Kinds: lookup, Containers: r.containers, Ports: r.ports,
 		Deployer: r.deployer, WebServer: r.web, Certs: r.certs, Admin: &fakeAdmin{}, Clock: r.clock, Events: r.events,
-		Usage:     r.usage,
-		Diagnoser: NewDiagnoser(DiagnoserParts{Kinds: lookup, Ports: r.ports, DNS: r.dns, Admin: &fakeAdmin{}, Certs: r.certs, Clock: r.clock, PublicIP: "198.51.100.24"}),
-		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Usage: r.usage,
+		Diagnoser: NewDiagnoser(DiagnoserParts{Kinds: lookup, Ports: r.ports, DNS: r.dns, Admin: &fakeAdmin{}, Certs: r.certs, Clock: r.clock, PublicIP: "198.51.100.24",
+			WebServer: r.web, AppNetwork: "shelf-net"}),
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	r.w = w.(*healthWatcher)
 	return r

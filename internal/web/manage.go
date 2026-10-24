@@ -14,8 +14,9 @@ import (
 // ── 서비스 추가 ─────────────────────────────
 
 type newServiceScreen struct {
-	Kinds []string
-	Form  serviceForm
+	Kinds      []string
+	Form       serviceForm
+	Containers []string // 외부 연결 칸 자동완성 — 이 서버의 다른 컨테이너
 }
 
 func kindNames() []string {
@@ -35,7 +36,8 @@ func (s *Server) newServicePage(w http.ResponseWriter, r *http.Request) {
 	if k, err := model.ParseKindName(r.URL.Query().Get("kind")); err == nil {
 		f.Kind = string(k)
 	}
-	s.render(w, r, http.StatusOK, "new_service", view{Nav: "home", User: &u, Data: newServiceScreen{Kinds: kindNames(), Form: f}})
+	choices, _ := s.d.Viewer.ContainerChoices(r.Context()) // 못 읽으면 제안만 없다
+	s.render(w, r, http.StatusOK, "new_service", view{Nav: "home", User: &u, Data: newServiceScreen{Kinds: kindNames(), Form: f, Containers: choices}})
 }
 
 func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
@@ -46,8 +48,9 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 	f := readServiceForm(r)
 	fail := func(err error) {
 		f.Token = "" // 토큰은 다시 그리지 않는다
+		choices, _ := s.d.Viewer.ContainerChoices(r.Context())
 		s.render(w, r, http.StatusBadRequest, "new_service", view{Nav: "home", User: &u, Err: errKeyOf(err), ErrLine: errLineOf(err),
-			Data: newServiceScreen{Kinds: kindNames(), Form: f}})
+			Data: newServiceScreen{Kinds: kindNames(), Form: f, Containers: choices}})
 	}
 	kind, err := model.ParseKindName(f.Kind)
 	if err != nil {
@@ -340,6 +343,7 @@ type serviceScreen struct {
 	WebRefused    string              // 웹서버가 거절한 이유 (그 말 그대로)
 	Form          string              // 오류가 난 폼
 	Findings      []finding           // 지켜보기가 찾은 이 서비스의 문제
+	Containers    []string            // 외부 연결 칸 자동완성 (외부 연결 서비스만)
 	Usage         *model.ResourceUsage
 }
 
@@ -374,6 +378,9 @@ func (s *Server) serviceView(r *http.Request, u model.Account, sv model.ServiceV
 		Deploys: sv.Deploys, LiveID: sv.LiveID, Running: sv.Deploying, Form: form,
 		WebhookURL: sv.Webhook.URL, WebhookSecret: sv.Webhook.Secret, HasToken: sv.Form.HasToken,
 		Domains: s.domainRows(r, sv.Domains), Web: webFormOf(sv.Web), Usage: sv.Usage,
+	}
+	if sv.Service.External != "" {
+		d.Containers, _ = s.d.Viewer.ContainerChoices(r.Context())
 	}
 	for _, f := range sv.Findings {
 		row := findingOf(f)

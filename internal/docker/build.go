@@ -253,6 +253,24 @@ func (c *Client) ensureNetwork(ctx context.Context, name string) error {
 	return c.call(ctx, http.MethodPost, "/networks/create", map[string]any{"Name": name, "CheckDuplicate": true}, nil)
 }
 
+// networksOf는 컨테이너가 붙은 네트워크 이름들이다 (이름순).
+func (c *Client) networksOf(ctx context.Context, name string) ([]string, error) {
+	var raw struct {
+		NetworkSettings struct {
+			Networks map[string]json.RawMessage
+		}
+	}
+	if err := c.call(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/json", nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(raw.NetworkSettings.Networks))
+	for n := range raw.NetworkSettings.Networks {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 func (c *Client) start(ctx context.Context, name string) error {
 	return c.call(ctx, http.MethodPost, "/containers/"+url.PathEscape(name)+"/start", nil, nil)
 }

@@ -29,6 +29,7 @@ type Parts struct {
 	AppLogs    contract.ContainerLogReader
 	Access     contract.AccessLogReader
 	Watch      contract.HealthWatcher // 지켜보기가 찾은 문제 — 여기서는 읽기만 한다
+	Hide       []string               // 제안하지 않을 컨테이너 (Naru 자신과 웹서버)
 	HTTPSPort  int                    // 바깥에서 본 HTTPS 포트 — 443이 아니면 웹훅 주소에 붙인다 (로컬 개발)
 }
 
@@ -151,6 +152,35 @@ func (v serviceViewer) Detail(ctx context.Context, id model.ServiceID) (model.Se
 		}
 	}
 	return view, nil
+}
+
+// ContainerChoices는 외부 연결 칸에 제안할, 이 서버에서 도는 다른 컨테이너다 ("이름:포트", 이름순).
+// Naru가 띄운 서비스의 컨테이너와 Naru 자신·웹서버는 뺀다. Docker를 읽지 못하면 비어 있다.
+func (v serviceViewer) ContainerChoices(ctx context.Context) ([]string, error) {
+	all, err := v.p.Services.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	skip := map[string]bool{}
+	for _, h := range v.p.Hide {
+		skip[h] = true
+	}
+	for _, s := range all {
+		skip[s.Live.CurrentContainer()] = true
+	}
+	var out []string
+	for name, st := range v.containers(ctx) {
+		if skip[name] || st.State != "running" {
+			continue
+		}
+		if len(st.Ports) > 0 {
+			out = append(out, fmt.Sprintf("%s:%d", name, st.Ports[0]))
+		} else {
+			out = append(out, name+":")
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // usageOf는 지켜보기가 읽은 CPU·메모리다. 직접 멈춘 서비스는 마지막 값이 남아 있어도 보이지 않는다.

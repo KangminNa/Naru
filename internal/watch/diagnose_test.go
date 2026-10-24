@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -28,6 +29,7 @@ func (f *fakeDNS) PointsHere(_ context.Context, d model.DomainName, thisServer s
 func domain(s string) model.DomainName { d, _ := model.ParseDomainName(s); return d }
 
 type diagRig struct {
+	web   *fakeWebServer
 	d     *diagnoser
 	ports *fakePorts
 	dns   *fakeDNS
@@ -43,9 +45,10 @@ func newDiagRig(publicIP string) *diagRig {
 		certs: &fakeCerts{},
 		admin: &fakeAdmin{},
 		clock: &fakeClock{now: time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)},
+		web:   &fakeWebServer{up: true},
 	}
 	r.d = NewDiagnoser(DiagnoserParts{Kinds: kinds.NewLookup(kinds.Tools{}), Ports: r.ports, DNS: r.dns, Admin: r.admin,
-		Certs: r.certs, Clock: r.clock, PublicIP: publicIP}).(*diagnoser)
+		Certs: r.certs, Clock: r.clock, PublicIP: publicIP, WebServer: r.web, AppNetwork: "shelf-net"}).(*diagnoser)
 	return r
 }
 
@@ -225,5 +228,40 @@ func TestSnapshotCollectsFindingsHeaviestFirst(t *testing.T) {
 	r.check()
 	if got := keys(r.w.Snapshot().Findings); !slices.Equal(got, []string{"find.cert"}) {
 		t.Fatalf("%v", got)
+	}
+}
+
+// 외부 연결 — 이 서버의 포트에 닿지 않거나, 이름으로 닿지 않는 네트워크에만 있는 컨테이너면 이유를 말한다 (진단만, 알림은 없다).
+func TestExternalTargetsTheWebServerCannotReach(t *testing.T) {
+	r := newDiagRig("")
+	nas := model.Service{ID: 7, Name: name("nas"), Kind: model.KindExternal, External: "host.docker.internal:5984"}
+	r.ports.deaf["host.docker.internal"] = true
+	fs := r.d.Diagnose(ctx, nas, nil)
+	if len(fs) != 1 || fs[0].Key != "find.hostport" || fs[0].Level != model.FindingUrgent || fmt.Sprint(fs[0].Args) != "[5984 172.17.0.1]" || fs[0].Name != "nas" {
+		t.Fatalf("without a lookup the common bridge IP is suggested: %+v", fs)
+	}
+	r.dns.ips["host.docker.internal"] = []string{"172.18.0.1"}
+	r.clock.now = r.clock.now.Add(11 * time.Minute)
+	if fs := r.d.Diagnose(ctx, nas, nil); len(fs) != 1 || fs[0].Args[1] != "172.18.0.1" {
+		t.Fatalf("the bridge IP differs per server — the real one is suggested: %+v", fs)
+	}
+	r.ports.deaf["host.docker.internal"] = false
+	if fs := r.d.Diagnose(ctx, nas, nil); len(fs) != 0 {
+		t.Fatalf("it answers: %+v", fs)
+	}
+
+	db := model.Service{ID: 8, Name: name("couch"), Kind: model.KindExternal, External: "couchdb:5984"}
+	r.web.unreachable = []model.ReachProblem{{Host: "couchdb", Why: "defaultbridge"}}
+	fs = r.d.Diagnose(ctx, db, nil)
+	if len(fs) != 1 || fs[0].Key != "find.bridge" || fmt.Sprint(fs[0].Args) != "[couchdb shelf-net]" {
+		t.Fatalf("%+v", fs)
+	}
+	r.web.unreachable = []model.ReachProblem{{Host: "couchdb", Why: "docker"}}
+	if fs := r.d.Diagnose(ctx, db, nil); len(fs) != 0 {
+		t.Fatalf("Docker being down is already shown on its own: %+v", fs)
+	}
+	r.ports.deaf["couchdb"] = true
+	if fs := r.d.Diagnose(ctx, db, nil); len(fs) != 0 {
+		t.Fatalf("other hosts are not probed — external services are not watched: %+v", fs)
 	}
 }

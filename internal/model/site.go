@@ -41,9 +41,22 @@ type SiteMap struct {
 
 // WebServerStatus는 웹서버에 닿는지다.
 type WebServerStatus struct {
-	Connected bool
-	LastError string
-	AppliedAt time.Time
+	Connected   bool
+	LastError   string
+	AppliedAt   time.Time
+	Unreachable []ReachProblem // 웹서버가 닿게 하지 못한 연결 대상 (다른 네트워크의 컨테이너)
+}
+
+// DockerNetwork는 컨테이너가 붙은 Docker 네트워크 하나다.
+type DockerNetwork struct {
+	Name        string
+	UserDefined bool // 기본 bridge·host·none이 아니다 — 컨테이너 이름 풀이가 된다
+}
+
+// ReachProblem은 웹서버가 닿게 하지 못한 연결 대상 하나다.
+type ReachProblem struct {
+	Host string // 컨테이너 이름
+	Why  string // "defaultbridge"(기본 bridge에만 있어 이름 풀이가 안 됨) · "docker"(Docker에 닿지 못함)
 }
 
 // CertificateState는 도메인 하나의 인증서 상태다.

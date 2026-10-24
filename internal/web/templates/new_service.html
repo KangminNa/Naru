@@ -32,7 +32,8 @@
     {{end}}
     {{if eq $f.Kind "external"}}
     <label class="field"><span>{{t "field.upstream"}}</span>
-      <input class="input mono" name="upstream" value="{{$f.Upstream}}" placeholder="192.168.0.20:5000" required autofocus>
+      <input class="input mono" name="upstream" value="{{$f.Upstream}}" placeholder="192.168.0.20:5000" required autofocus list="naru-containers">
+      {{with $.Data.Containers}}<datalist id="naru-containers">{{range .}}<option value="{{.}}">{{end}}</datalist>{{end}}
       <small>{{t "new.external.hint"}}</small></label>
     {{end}}
     {{if eq $f.Kind "static"}}

@@ -58,6 +58,34 @@ type fakeDocker struct {
 	down    bool
 	hold    chan struct{}
 	listens map[string]model.Port // 컨테이너마다 앱이 실제로 듣는 포트 (없으면 어느 포트든 응답)
+	nets    map[string][]model.DockerNetwork
+	joins   []string
+}
+
+// NetworksOf는 nets에 적힌 컨테이너만 안다. 웹서버(naru-caddy)는 처음에 앱 네트워크에만 있다.
+func (d *fakeDocker) NetworksOf(_ context.Context, name string) ([]model.DockerNetwork, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if name == "naru-caddy" && d.nets[name] == nil {
+		return []model.DockerNetwork{{Name: "naru-net", UserDefined: true}}, nil
+	}
+	n, ok := d.nets[name]
+	if !ok {
+		return nil, model.ErrNotFound
+	}
+	return n, nil
+}
+func (d *fakeDocker) Join(_ context.Context, network, name string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.joins = append(d.joins, network+"<-"+name)
+	return nil
+}
+func (d *fakeDocker) Leave(context.Context, string, string) error { return nil }
+func (d *fakeDocker) joined() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.joins...)
 }
 
 func (d *fakeDocker) Start(_ context.Context, s model.ContainerSpec) error {
@@ -266,7 +294,7 @@ func newHarnessWith(t *testing.T, o harnessOpts) *harness {
 	cfg := Config{DataDir: t.TempDir(), Network: "naru-net", AdminDomain: envDomain, Version: "test"}
 	a, err := OpenWith(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), Outside{
 		Builder: fakeRegistry{}, Puller: fakeRegistry{}, Images: fakeImages{},
-		Starter: h.docker, Remover: h.docker, Switch: h.docker, Watcher: h.docker, Ports: h.docker, AppLogs: h.docker, Usage: h.docker,
+		Starter: h.docker, Remover: h.docker, Switch: h.docker, Watcher: h.docker, Ports: h.docker, AppLogs: h.docker, Usage: h.docker, Networks: h.docker,
 		Code: fakeGit{}, DNS: netcheck.NewDNS(lookup), Stats: fakeStats{}, Sender: h.caddy, Certs: h.certs, Snippet: fakeSnippet{},
 		Clock: system.Clock{}, Random: system.Random{}, ReadyTimeout: 5 * time.Second, WatchEvery: o.watchEvery,
 	})
@@ -1276,6 +1304,51 @@ func TestPastingADotenvFileWhenCreatingAService(t *testing.T) {
 	code, loc, _ = h.post("/services/1/settings", url.Values{"source": {"me/app"}, "env": {"A = 1\nA=2"}})
 	if code != http.StatusSeeOther || !strings.Contains(loc, "envfix=spaces-1.duplicate-1") || !strings.HasSuffix(loc, "#settings") {
 		t.Fatalf("%d %q", code, loc)
+	}
+}
+
+// ── 다른 네트워크의 컨테이너 · 이 서버의 포트 ──────────────
+
+func TestReachingContainersOnOtherNetworks(t *testing.T) {
+	h := newHarnessWith(t, harnessOpts{watchEvery: 20 * time.Millisecond})
+	h.signedIn()
+	h.docker.mu.Lock()
+	h.docker.nets = map[string][]model.DockerNetwork{
+		"grafana": {{Name: "monitor_default", UserDefined: true}},
+		"couchdb": {{Name: "bridge"}},
+	}
+	h.docker.mu.Unlock()
+	h.docker.set("grafana", model.ContainerState{Name: "grafana", Running: true, State: "running", Ports: []model.Port{3000}})
+	h.docker.set("couchdb", model.ContainerState{Name: "couchdb", Running: true, State: "running", Ports: []model.Port{5984}})
+
+	// 외부 연결 칸에 이 서버의 다른 컨테이너를 제안한다 (웹서버·Naru 자신은 빼고)
+	_, _, page := h.get("/services/new?kind=external")
+	if !strings.Contains(page, `<option value="grafana:3000">`) || !strings.Contains(page, `<option value="couchdb:5984">`) || strings.Contains(page, `value="naru-caddy`) {
+		t.Fatal("the external field suggests this server's other containers")
+	}
+
+	h.post("/services/new", url.Values{"kind": {"external"}, "upstream": {"grafana:3000"}, "domain": {"grafana.example.com"}})
+	h.waitFor("grafana is routed by name", func(cfg string) bool { return strings.Contains(cfg, "grafana:3000") })
+	for i := 0; i < 300 && len(h.docker.joined()) == 0; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if fmt.Sprint(h.docker.joined()) != "[monitor_default<-naru-caddy]" {
+		t.Fatalf("the web server joins grafana's network: %v", h.docker.joined())
+	}
+
+	// 기본 bridge에만 있는 컨테이너와 닿지 않는 이 서버의 포트는 이유를 말한다
+	h.post("/services/new", url.Values{"kind": {"external"}, "upstream": {"couchdb:5984"}, "domain": {"couch.example.com"}})
+	h.docker.listen("host.docker.internal", 1)
+	h.post("/services/new", url.Values{"kind": {"external"}, "upstream": {"localhost:5000"}, "domain": {"nas.example.com"}})
+	var body string
+	for i := 0; i < 300; i++ {
+		if _, _, body = h.get("/"); strings.Contains(body, "couchdb 컨테이너에 이름으로 닿을 수 없어요") && strings.Contains(body, "5000 포트에 웹서버가 닿지 못해요") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(body, "docker network connect naru-net couchdb") || !strings.Contains(body, "172.17.0.1:5000:5000") {
+		t.Fatalf("home explains both:\n%s", body)
 	}
 }
 

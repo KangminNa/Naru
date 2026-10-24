@@ -128,20 +128,23 @@ type webServerSync struct {
 	builder contract.SiteMapBuilder
 	writer  contract.ConfigWriter
 	sender  contract.ConfigSender
+	reach   contract.WebServerReach
 	log     *slog.Logger
 	kick    chan struct{}
 
-	mu       sync.RWMutex
-	status   model.WebServerStatus
-	lastHash [32]byte
-	lastLoad time.Time
+	mu          sync.RWMutex
+	status      model.WebServerStatus
+	unreachable []model.ReachProblem
+	lastHash    [32]byte
+	lastLoad    time.Time
 }
 
 // NewWebServerSync는 웹서버 맞추기를 만든다. run은 ctx가 끝날 때까지 맞추기를 돌린다.
 // sender는 관리 소켓 설정이 빠진 설정을 보내지 않는 것(AdminSocketGuard)이어야 한다.
+// reach는 보내기 전에 웹서버가 연결 대상 컨테이너에 닿게 한다 (다른 네트워크면 붙인다).
 func NewWebServerSync(builder contract.SiteMapBuilder, writer contract.ConfigWriter, sender contract.ConfigSender,
-	events contract.EventSubscriber, log *slog.Logger) (s contract.WebServerSync, run func(context.Context)) {
-	w := &webServerSync{builder: builder, writer: writer, sender: sender, log: log, kick: make(chan struct{}, 1)}
+	reach contract.WebServerReach, events contract.EventSubscriber, log *slog.Logger) (s contract.WebServerSync, run func(context.Context)) {
+	w := &webServerSync{builder: builder, writer: writer, sender: sender, reach: reach, log: log, kick: make(chan struct{}, 1)}
 	events.Subscribe(func(e model.Event) {
 		if _, ok := e.(model.SiteMapChanged); ok {
 			w.poke()
@@ -161,7 +164,9 @@ func (w *webServerSync) poke() {
 func (w *webServerSync) Status() model.WebServerStatus {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	return w.status
+	st := w.status
+	st.Unreachable = append([]model.ReachProblem(nil), w.unreachable...)
+	return st
 }
 
 func (w *webServerSync) run(ctx context.Context) {
@@ -198,6 +203,11 @@ func (w *webServerSync) SyncNow(ctx context.Context) error {
 		w.fail("build", err)
 		return err
 	}
+	// 설정이 같아도 한다 — 웹서버 컨테이너가 새로 만들어져 붙여 둔 네트워크가 풀렸을 수 있다
+	problems := w.reach.Ensure(ctx, m)
+	w.mu.Lock()
+	w.unreachable = problems
+	w.mu.Unlock()
 	cfg, err := w.writer.Write(m)
 	if err != nil {
 		w.fail("write", err)

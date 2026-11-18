@@ -26,7 +26,7 @@ func (ImageInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
 		return in, model.InputError{Field: "source", Code: "image"}
 	}
 	in.Repo, in.Branch, in.External = model.RepoURL{}, model.Branch{}, model.ExternalAddress{}
-	in.Folder, in.BuildPath = model.FolderPath{}, model.FolderPath{}
+	in.Folder, in.BuildPath, in.EnvFile = model.FolderPath{}, model.FolderPath{}, model.EnvFile{}
 	return in, nil
 }
 
@@ -41,7 +41,7 @@ func (StaticInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
 		in.Branch = model.DefaultBranch()
 	}
 	in.Image, in.External, in.BuildPath, in.Port = model.ImageRef{}, model.ExternalAddress{}, model.FolderPath{}, 0
-	in.Env, in.Volumes = model.EnvVars{}, model.Volumes{}
+	in.Env, in.EnvFile, in.Volumes = model.EnvVars{}, model.EnvFile{}, model.Volumes{}
 	return in, nil
 }
 
@@ -54,6 +54,6 @@ func (ExternalInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
 	}
 	in.Repo, in.Branch, in.Image = model.RepoURL{}, model.Branch{}, model.ImageRef{}
 	in.Folder, in.BuildPath, in.Port, in.AutoDeploy = model.FolderPath{}, model.FolderPath{}, 0, false
-	in.Env, in.Volumes = model.EnvVars{}, model.Volumes{}
+	in.Env, in.EnvFile, in.Volumes = model.EnvVars{}, model.EnvFile{}, model.Volumes{}
 	return in, nil
 }

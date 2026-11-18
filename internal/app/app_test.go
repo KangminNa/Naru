@@ -1307,6 +1307,59 @@ func TestPastingADotenvFileWhenCreatingAService(t *testing.T) {
 	}
 }
 
+// ── .env 파일 칸 ─────────────────────────
+
+func TestTheEnvFileBoxForRepositories(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+
+	_, _, page := h.get("/services/new?kind=repo")
+	if i, j := strings.Index(page, `name="env_file"`), strings.Index(page, "<details"); i < 0 || j < 0 || i > j {
+		t.Fatal("the .env file box sits above the folded options for repositories")
+	}
+	for _, kind := range []string{"image", "static", "external"} {
+		if _, _, page := h.get("/services/new?kind=" + kind); strings.Contains(page, `name="env_file"`) {
+			t.Fatalf("%s builds nothing — no .env file box", kind)
+		}
+	}
+
+	dotenv := "# 빌드에 필요\nNEXT_PUBLIC_API=\"https://api.example.com\" # 그대로\n"
+	code, loc, _ := h.post("/services/new", url.Values{"kind": {"repo"}, "source": {"https://github.com/me/web"}, "env_file": {dotenv}})
+	if code != http.StatusSeeOther || strings.Contains(loc, "envfix") || strings.Contains(loc, "NEXT_PUBLIC") {
+		t.Fatalf("%d %q — kept as written, nothing converted", code, loc)
+	}
+	h.app.wait()
+	sec, _ := h.secretsOf().Get(ctx, 1)
+	if sec.EnvFile.Text() != dotenv || len(sec.Env.List()) != 0 {
+		t.Fatalf("stored as written, apart from the env vars: %q", sec.EnvFile.Text())
+	}
+	deps, _ := h.history().Recent(ctx, 1, 5)
+	if len(deps) != 1 {
+		t.Fatalf("%+v", deps)
+	}
+	if dep, _ := h.history().Get(ctx, deps[0].ID); !strings.Contains(dep.Log, ".env 파일 2줄") || strings.Contains(dep.Log, "api.example.com") {
+		t.Fatalf("the first deploy already has it:\n%s", dep.Log)
+	}
+
+	// 설정에서도 보이고, 바꾸면 다시 배포해야 반영된다
+	_, _, page = h.get("/services/1")
+	if !strings.Contains(page, `name="env_file"`) || !strings.Contains(page, "NEXT_PUBLIC_API=&#34;https://api.example.com&#34;") {
+		t.Fatal("the settings show the file")
+	}
+	form := url.Values{"source": {"https://github.com/me/web"}, "auto_deploy": {"1"}, "env_file": {dotenv}}
+	if _, loc, _ := h.post("/services/1/settings", form); strings.Contains(loc, "redeploy") {
+		t.Fatalf("unchanged means no redeploy: %q", loc)
+	}
+	form.Set("env_file", "A=1")
+	if _, loc, _ := h.post("/services/1/settings", form); !strings.Contains(loc, "ok=redeploy") {
+		t.Fatalf("a changed file needs a redeploy: %q", loc)
+	}
+	form.Set("env_file", "A=\x00")
+	if code, _, body := h.post("/services/1/settings", form); code != http.StatusBadRequest || !strings.Contains(body, "64KB") {
+		t.Fatalf("%d", code)
+	}
+}
+
 // ── 다른 네트워크의 컨테이너 · 이 서버의 포트 ──────────────
 
 func TestReachingContainersOnOtherNetworks(t *testing.T) {

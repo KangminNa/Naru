@@ -159,15 +159,16 @@ func (r Services) Delete(ctx context.Context, id model.ServiceID) error {
 // ── 비밀 ─────────────────────────────────
 
 func (r Services) secrets(ctx context.Context, id model.ServiceID) (model.ServiceSecrets, error) {
-	var env, vols, token, hook string
-	err := r.db.sql.QueryRowContext(ctx, `SELECT env, volumes, git_token, webhook_secret FROM services WHERE id = ?`, int64(id)).Scan(&env, &vols, &token, &hook)
+	var env, envFile, vols, token, hook string
+	err := r.db.sql.QueryRowContext(ctx, `SELECT env, env_file, volumes, git_token, webhook_secret FROM services WHERE id = ?`, int64(id)).Scan(&env, &envFile, &vols, &token, &hook)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.ServiceSecrets{}, model.ErrNotFound
 	}
 	if err != nil {
 		return model.ServiceSecrets{}, err
 	}
-	return model.ServiceSecrets{Env: model.StoredEnvVars(env), Volumes: model.StoredVolumes(vols), GitToken: token, WebhookSecret: hook}, nil
+	return model.ServiceSecrets{Env: model.StoredEnvVars(env), EnvFile: model.StoredEnvFile(envFile), Volumes: model.StoredVolumes(vols),
+		GitToken: token, WebhookSecret: hook}, nil
 }
 
 // Secrets는 SecretStore다 (Services와 같은 행을 쓰지만 하는 일이 달라 따로 내보낸다).
@@ -180,8 +181,8 @@ func (s Secrets) Get(ctx context.Context, id model.ServiceID) (model.ServiceSecr
 }
 
 func (s Secrets) Set(ctx context.Context, id model.ServiceID, sec model.ServiceSecrets) error {
-	_, err := s.r.db.sql.ExecContext(ctx, `UPDATE services SET env = ?, volumes = ?, git_token = ?, webhook_secret = ? WHERE id = ?`,
-		sec.Env.Text(), sec.Volumes.Text(), sec.GitToken, sec.WebhookSecret, int64(id))
+	_, err := s.r.db.sql.ExecContext(ctx, `UPDATE services SET env = ?, env_file = ?, volumes = ?, git_token = ?, webhook_secret = ? WHERE id = ?`,
+		sec.Env.Text(), sec.EnvFile.Text(), sec.Volumes.Text(), sec.GitToken, sec.WebhookSecret, int64(id))
 	return err
 }
 

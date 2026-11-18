@@ -50,6 +50,11 @@
       <textarea class="input mono" name="env" rows="4" placeholder="DATABASE_URL=postgres://…&#10;NODE_ENV=production">{{$f.Env}}</textarea>
       <small>{{t "env.hint"}}</small></label>
     {{end}}
+    {{if eq $f.Kind "repo"}}
+    <label class="field"><span>{{t "field.envfile"}}</span>
+      <textarea class="input mono" name="env_file" rows="3" placeholder="NEXT_PUBLIC_API_URL=https://api.example.com">{{$f.EnvFile}}</textarea>
+      <small>{{t "envfile.hint"}}</small></label>
+    {{end}}
 
     <details class="more">
       <summary>{{t "new.more"}}</summary>

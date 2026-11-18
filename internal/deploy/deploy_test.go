@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"archive/tar"
 	"context"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ type fakeDocker struct {
 	containers map[string]*fakeContainer
 	images     map[string]model.ImageDetails // ref 또는 ID → 이미지
 	builds     []string
+	packed     map[string]string // 마지막 빌드 묶음의 이름 → 내용
 	removedImg []string
 	listens    func(name string) bool // nil이면 모두 듣는다
 	exits      func(name string) bool // 시작하자마자 죽는가
@@ -45,9 +47,20 @@ func newFakeDocker() *fakeDocker {
 }
 
 func (f *fakeDocker) Build(_ context.Context, folder io.Reader, tag string, log io.Writer) (model.ImageID, error) {
+	packed := map[string]string{}
+	tr := tar.NewReader(folder)
+	for {
+		h, err := tr.Next()
+		if err != nil {
+			break
+		}
+		body, _ := io.ReadAll(tr)
+		packed[h.Name] = string(body)
+	}
 	io.Copy(io.Discard, folder)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.packed = packed
 	id := "sha256:built-" + tag
 	f.builds = append(f.builds, tag)
 	f.images[id] = model.ImageDetails{ID: model.ImageID(id)}
@@ -393,6 +406,38 @@ func TestRepoDeployBuildsWithThePortFromTheDockerfile(t *testing.T) {
 	id2 := r.create(model.NewService{Name: name("plain"), Kind: model.KindRepo, Source: "https://github.com/me/plain"}, "")
 	if dep := r.deploy(id2); dep.Status != model.DeployFailed || !strings.Contains(dep.Log, "정적 사이트") {
 		t.Fatalf("a repo without Dockerfile points to static sites:\n%s", dep.Log)
+	}
+}
+
+// 저장소의 .env는 보통 git에 없다 — .env 파일 칸의 내용이 빌드 폴더의 .env가 된다. 기록에는 줄 수만.
+func TestRepoBuildGetsTheEnvFile(t *testing.T) {
+	r := newRig(t)
+	r.git.files = map[string]string{"web/Dockerfile": "FROM node:20\nCOPY . .\nEXPOSE 3000\n", "web/.dockerignore": ".env\n", "web/.env": "FROM_REPO=1\n"}
+	id := r.create(model.NewService{Name: name("blog"), Kind: model.KindRepo, Source: "https://github.com/me/blog", BuildPath: "web"}, "")
+	envFile, _ := model.ParseEnvFile("NEXT_PUBLIC_API=https://api.example.com\nSECRET_KEY=s3cr3t")
+	sec, _ := store.NewSecrets(r.db).Get(ctx, id)
+	sec.EnvFile = envFile
+	store.NewSecrets(r.db).Set(ctx, id, sec)
+
+	dep := r.deploy(id)
+	if dep.Status != model.DeploySuccess {
+		t.Fatalf("%+v\n%s", dep, dep.Log)
+	}
+	if got := r.docker.packed[".env"]; got != "NEXT_PUBLIC_API=https://api.example.com\nSECRET_KEY=s3cr3t\n" {
+		t.Fatalf("the build folder's .env is the one from Naru: %q", got)
+	}
+	if !strings.Contains(dep.Log, ".env 파일 2줄") || strings.Contains(dep.Log, "s3cr3t") {
+		t.Fatalf("the log says how many lines, never what:\n%s", dep.Log)
+	}
+
+	// 비어 있으면 저장소 그대로 (.dockerignore가 뺀 것은 빠진다)
+	sec.EnvFile = model.EnvFile{}
+	store.NewSecrets(r.db).Set(ctx, id, sec)
+	if dep := r.deploy(id); dep.Status != model.DeploySuccess || strings.Contains(dep.Log, ".env 파일") {
+		t.Fatalf("%s", dep.Log)
+	}
+	if _, ok := r.docker.packed[".env"]; ok {
+		t.Fatal("without the box the repo is packed as it is")
 	}
 }
 

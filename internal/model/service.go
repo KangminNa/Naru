@@ -50,6 +50,7 @@ type ServiceInput struct {
 	Token      string     // 비면 그대로 둔다
 	ClearToken bool
 	Env        EnvVars
+	EnvFile    EnvFile // 저장소 종류만 — 빌드 폴더의 .env
 	Volumes    Volumes
 	AutoDeploy bool
 }
@@ -169,6 +170,7 @@ type ServiceSettings struct {
 // ServiceSecrets는 배포에만 쓰는 비밀이다. 화면 계층은 이 타입을 쓰지 않는다.
 type ServiceSecrets struct {
 	Env           EnvVars
+	EnvFile       EnvFile
 	Volumes       Volumes
 	GitToken      string
 	WebhookSecret string

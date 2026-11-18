@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -266,5 +267,30 @@ func TestEnvVarsAcceptDotenvAndSayWhatChanged(t *testing.T) {
 	// 이미 저장된 값은 그대로 읽는다 — 따옴표가 든 예전 값의 뜻이 바뀌지 않는다
 	if got := StoredEnvVars(`KEY="kept"`).List(); len(got) != 1 || got[0] != `KEY="kept"` {
 		t.Fatalf("%v", got)
+	}
+}
+
+func TestEnvFileKeepsWhatWasWritten(t *testing.T) {
+	in := "# 빌드에 필요\r\nNEXT_PUBLIC_API=\"https://api.example.com\" # 그대로\nexport A='1'"
+	f, err := ParseEnvFile(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# 빌드에 필요\nNEXT_PUBLIC_API=\"https://api.example.com\" # 그대로\nexport A='1'\n"
+	if f.Text() != want || string(f.Bytes()) != want || f.Lines() != 3 {
+		t.Fatalf("written as is, ending with a newline: %q (%d lines)", f.Text(), f.Lines())
+	}
+	if f, err := ParseEnvFile(" \n\t\n"); err != nil || !f.IsZero() {
+		t.Fatalf("blank means no file: %q %v", f.Text(), err)
+	}
+	for _, bad := range []string{"A=1\x00", strings.Repeat("A", 64<<10+1)} {
+		if _, err := ParseEnvFile(bad); err == nil {
+			t.Errorf("%.10q… should be refused", bad)
+		} else if ie, _ := AsInputError(err); ie.Field != "envfile" || ie.Code != "envfile" {
+			t.Errorf("%v", err)
+		}
+	}
+	if StoredEnvFile("A=1").Text() != "A=1" {
+		t.Fatal("stored text is read as is")
 	}
 }

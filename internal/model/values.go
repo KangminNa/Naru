@@ -491,3 +491,34 @@ func (v Volumes) List() []string {
 	}
 	return out
 }
+
+// EnvFile은 빌드 폴더에 넣을 .env 파일이다 — 적은 그대로 둔다. 해석은 앱의 dotenv가 한다.
+// 저장소의 .env는 보통 git에 없어서, 빌드 중에 .env가 필요한 저장소는 이것이 있어야 빌드된다.
+type EnvFile struct{ text string }
+
+const envFileMax = 64 << 10
+
+// ParseEnvFile은 화면에 적은 글을 .env 파일로 받는다. 64KB까지, 널 문자 없이. 공백뿐이면 비어 있다.
+func ParseEnvFile(text string) (EnvFile, error) {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	if len(text) > envFileMax || strings.ContainsRune(text, 0) {
+		return EnvFile{}, InputError{Field: "envfile", Code: "envfile"}
+	}
+	if strings.TrimSpace(text) == "" {
+		return EnvFile{}, nil
+	}
+	if !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	return EnvFile{text}, nil
+}
+
+// StoredEnvFile은 이미 저장된 글을 그대로 쓴다. 저장소(store)만 쓴다.
+func StoredEnvFile(text string) EnvFile { return EnvFile{text} }
+
+func (f EnvFile) Text() string  { return f.text }
+func (f EnvFile) IsZero() bool  { return f.text == "" }
+func (f EnvFile) Bytes() []byte { return []byte(f.text) }
+
+// Lines는 줄 수다 — 배포 기록에는 내용 대신 이것만 남긴다.
+func (f EnvFile) Lines() int { return strings.Count(f.text, "\n") }

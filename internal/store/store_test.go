@@ -107,14 +107,15 @@ func TestSecretsAndLiveStateStaySeparate(t *testing.T) {
 	r := NewServices(db)
 	id, _ := r.Create(ctx, model.NewService{Name: name("blog"), Kind: model.KindRepo, Alias: "naru-blog", Port: 3000})
 	env, _, _ := model.ParseEnvVars("A=1\nB=2")
-	if err := NewSecrets(db).Set(ctx, id, model.ServiceSecrets{Env: env, GitToken: "ghp_x", WebhookSecret: "s"}); err != nil {
+	envFile, _ := model.ParseEnvFile("NEXT_PUBLIC_X=\"y\"")
+	if err := NewSecrets(db).Set(ctx, id, model.ServiceSecrets{Env: env, EnvFile: envFile, GitToken: "ghp_x", WebhookSecret: "s"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := NewLiveStates(db).Save(ctx, id, model.LiveState{Alias: "naru-blog", Instance: "naru-blog-4"}); err != nil {
 		t.Fatal(err)
 	}
 	sec, _ := NewSecrets(db).Get(ctx, id)
-	if sec.GitToken != "ghp_x" || len(sec.Env.List()) != 2 {
+	if sec.GitToken != "ghp_x" || len(sec.Env.List()) != 2 || sec.EnvFile.Text() != "NEXT_PUBLIC_X=\"y\"\n" {
 		t.Fatalf("%+v", sec)
 	}
 	s, _ := r.Get(ctx, id)

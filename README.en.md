@@ -41,7 +41,7 @@ Paste an nginx config and it is turned into those fields. Applying checks agains
 
 | Kind | What |
 |---|---|
-| Repository | Builds the repo's `Dockerfile` into a container. Build path for monorepos. Port from `EXPOSE` |
+| Repository | Builds the repo's `Dockerfile` into a container. Build path for monorepos. Port from `EXPOSE`. A `.env` that isn't in git goes in the ".env file" box — it is put into the build folder at build time |
 | Image | Pulls an image from Docker Hub or GHCR into a container |
 | Static site | Serves a repo folder straight from the web server, no container. Hidden files (`.env`, `.github`…) are never published |
 | External | Just an address for something already running (NAS, router, a program on the host). `localhost` means this server. Another container on this server is `name:port` — if it sits on another compose network, the web server joins that network by itself |
@@ -143,7 +143,7 @@ scripts/caddy-validate.sh       # does real Caddy accept the configs we draw?
   Use it on your own server and give accounts only to people you would trust with the server. Use a long admin password.
 - Deploying a service means running someone's code on your server. Deploy repositories you trust.
   If you deploy an app that gets docker.sock itself (like Portainer), put allowed IPs or password protection in front of it — that app is root-equivalent too.
-- Secrets (git tokens, webhook secrets, environment variables) are stored in the data folder. Protect and back it up. They never reach the screen, the logs or the web server config.
+- Secrets (git tokens, webhook secrets, environment variables, `.env` files) are stored in the data folder. A `.env` file also ends up inside the built image (which stays on this server). Protect and back it up. They never reach the screen, the logs or the web server config.
 - **Expose only 80/443.** Caddy's admin API is a unix socket shared only by Caddy and Naru.
 - Built-in defenses: scrypt passwords, 15-minute lockout after 5 failed logins, Secure/httpOnly/SameSite cookies, rejecting forms from other sites, CSP,
   verified webhooks with a body size limit, validation of git URLs, branches, paths and image names.

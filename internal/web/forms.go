@@ -23,6 +23,7 @@ type serviceForm struct {
 	Token      string
 	ClearToken bool
 	Env        string
+	EnvFile    string
 	Volumes    string
 	AutoDeploy bool
 }
@@ -41,6 +42,7 @@ func readServiceForm(r *http.Request) serviceForm {
 		Token:      strings.TrimSpace(r.FormValue("token")),
 		ClearToken: r.FormValue("clear_token") == "1",
 		Env:        strings.ReplaceAll(r.FormValue("env"), "\r\n", "\n"),
+		EnvFile:    strings.ReplaceAll(r.FormValue("env_file"), "\r\n", "\n"),
 		Volumes:    strings.ReplaceAll(r.FormValue("volumes"), "\r\n", "\n"),
 		AutoDeploy: r.FormValue("auto_deploy") == "1",
 	}
@@ -54,7 +56,7 @@ func formFrom(f model.ServiceForm) serviceForm {
 	}
 	return serviceForm{
 		Source: f.Source, Branch: f.Branch, BuildPath: f.BuildPath, Folder: f.Folder, Upstream: f.External,
-		Port: port, AutoDeploy: f.AutoDeploy, Env: f.EnvText, Volumes: f.Volumes,
+		Port: port, AutoDeploy: f.AutoDeploy, Env: f.EnvText, EnvFile: f.EnvFileText, Volumes: f.Volumes,
 	}
 }
 
@@ -92,6 +94,9 @@ func (f serviceForm) input(kind model.KindName) (model.ServiceInput, []model.Env
 	}
 	var notes []model.EnvNote
 	if in.Env, notes, err = model.ParseEnvVars(f.Env); err != nil {
+		return in, nil, err
+	}
+	if in.EnvFile, err = model.ParseEnvFile(f.EnvFile); err != nil {
 		return in, nil, err
 	}
 	if in.Volumes, err = model.ParseVolumes(f.Volumes); err != nil {

@@ -444,8 +444,9 @@ type WorkFolder interface {
 }
 
 // BuildContextPacker는 빌드할 폴더를 묶는다 (.git·.dockerignore 제외).
+// extra는 폴더에 없어도 묶음에 넣을 파일(폴더 기준 경로 → 내용)이다 — .dockerignore와 상관없이 넣고, 같은 이름의 파일은 덮어쓴다.
 type BuildContextPacker interface {
-	Pack(folder string) io.ReadCloser
+	Pack(folder string, extra map[string][]byte) io.ReadCloser
 }
 
 // DockerfilePortReader는 Dockerfile의 EXPOSE에서 앱 포트를 찾는다. Dockerfile이 없으면 found가 거짓.

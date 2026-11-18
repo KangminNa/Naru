@@ -35,8 +35,18 @@ func (b RepoBuilder) Build(ctx context.Context, req model.BuildRequest, log cont
 	}
 	v.Port = only(ports)
 
+	secrets, err := b.t.Secrets.Get(ctx, s.ID)
+	if err != nil {
+		return v, err
+	}
 	log.Step("이미지 만들기", "building the image")
-	packed := b.t.Packer.Pack(folder)
+	var extra map[string][]byte
+	if !secrets.EnvFile.IsZero() {
+		extra = map[string][]byte{".env": secrets.EnvFile.Bytes()}
+		n := secrets.EnvFile.Lines()
+		fmt.Fprintf(log, ".env 파일 %d줄을 빌드 폴더에 넣어요 (저장소의 .env는 이것으로 바뀌어요) / adding the .env file (%d lines) to the build folder, replacing any in the repo\n", n, n)
+	}
+	packed := b.t.Packer.Pack(folder, extra)
 	defer packed.Close()
 	v.Image, err = b.t.Builder.Build(ctx, packed, model.ImageTag(s.Name, req.Deployment), log)
 	return v, err

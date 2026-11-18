@@ -85,14 +85,25 @@ func TestDockerfilePorts(t *testing.T) {
 
 func tarNames(t *testing.T, dir string) []string {
 	t.Helper()
-	rc := TarPacker{}.Pack(dir)
+	var names []string
+	for name := range tarFiles(t, dir, nil) {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// tarFiles는 묶음 안의 이름 → 내용이다.
+func tarFiles(t *testing.T, dir string, extra map[string][]byte) map[string]string {
+	t.Helper()
+	rc := TarPacker{}.Pack(dir, extra)
 	defer rc.Close()
 	raw, err := io.ReadAll(rc)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tr := tar.NewReader(bytes.NewReader(raw))
-	var names []string
+	out := map[string]string{}
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
@@ -101,10 +112,36 @@ func tarNames(t *testing.T, dir string) []string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		names = append(names, h.Name)
+		if _, dup := out[h.Name]; dup {
+			t.Fatalf("%s is in the tar twice", h.Name)
+		}
+		body, _ := io.ReadAll(tr)
+		out[h.Name] = string(body)
 	}
-	sort.Strings(names)
-	return names
+	return out
+}
+
+func TestPackAddsTheEnvFileWithoutWritingIt(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, map[string]string{
+		"Dockerfile":    "FROM scratch\nCOPY .env .\n",
+		".dockerignore": ".env\n.env.*\n",
+		".env":          "FROM_REPO=1\n",
+		".env.local":    "LOCAL=1\n",
+	})
+	got := tarFiles(t, dir, map[string][]byte{".env": []byte("FROM_NARU=1\n")})
+	if got[".env"] != "FROM_NARU=1\n" {
+		t.Fatalf("Naru's .env replaces the repo's and ignores .dockerignore: %q", got[".env"])
+	}
+	if _, ok := got[".env.local"]; ok {
+		t.Fatal(".dockerignore still applies to everything else")
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, ".env")); string(b) != "FROM_REPO=1\n" {
+		t.Fatalf("nothing is written to the folder: %q", b)
+	}
+	if got := tarFiles(t, dir, nil); got[".env"] != "" || len(got) != 2 {
+		t.Fatalf("without extra the folder is packed as before: %v", got)
+	}
 }
 
 func TestPackHonoursDockerignore(t *testing.T) {

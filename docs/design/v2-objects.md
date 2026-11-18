@@ -179,7 +179,7 @@
 | `SnippetCompiler` | 고급 칸의 Caddyfile 지시어를 웹서버 형식으로 바꾼다 — 그 사이트의 경로 처리만 꺼내고 나머지는 "적용되지 않음"으로 알린다 | `caddy.AdaptCompiler` (Caddy 관리 API `/adapt`) |
 | `CodeDownloader` | 저장소 코드를 내려받는다 (토큰은 인자·설정 파일에 남기지 않는다) | `git.Downloader` |
 | `WorkFolder` | 잠깐 쓸 작업 폴더를 빌려주고 돌려받는다. 그 안의 경로를 심볼릭 링크로 빠져나가지 않게 찾아 준다 | `files.TempFolders` |
-| `BuildContextPacker` | 빌드할 폴더를 묶는다 (`.git`·`.dockerignore` 제외) | `files.TarPacker` |
+| `BuildContextPacker` | 빌드할 폴더를 묶는다 (`.git`·`.dockerignore` 제외). 폴더에 없는 파일(`.env` 파일 칸)을 더해 넣는다 — 디스크에 쓰지 않는다 | `files.TarPacker` |
 | `DockerfilePortReader` | Dockerfile의 `EXPOSE`에서 앱 포트를 찾는다 | `files.DockerfileReader` |
 | `SiteFiles` | 정적 사이트 파일을 올리고·복사하고·지운다 (숨김 파일 제외) | `files.SiteFolders` |
 | `PortChecker` | 그 주소의 포트가 응답하는지 본다 | `netcheck.TCP` |
@@ -293,6 +293,7 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `Email` | 인증서 연락처 이메일 |
 | `Username` | 계정 이름 — 영문·숫자·`.-_` 2~32자 |
 | `EnvVars` · `Volumes` | `KEY=value` 줄들 · `/서버경로:/컨테이너경로[:ro]` 줄들. 저장된 글은 `Stored…`로 그대로 읽고, 틀린 줄은 `List`가 건너뛴다 (v1에서 온 값을 잃지 않게) |
+| `EnvFile` | 빌드 폴더에 넣을 `.env` 파일 — 적은 그대로(해석은 앱의 dotenv가 한다). 64KB까지, 널 문자 없이. 저장된 글은 `StoredEnvFile`로 그대로 읽는다 (2026-11-18) |
 | `EnvNote` · `EnvFix` | 환경 변수를 저장하면서 고친 줄 하나(줄 번호·이름·무엇을) · 고친 종류(export·따옴표·줄 끝 주석·공백·같은 이름). `ParseEnvVars`는 `.env`를 붙여 넣어도 받아서 저장할 모양(`KEY=값`, = 뒤 그대로)으로 바꾸고 고친 것을 알려 준다 — 저장된 값의 뜻과 `List`는 그대로다 (2026-10-19) |
 | `KindName` | 서비스 종류 이름. `ParseKindName`은 아는 이름인지만 본다 — 종류마다 다른 행동은 `kinds`만 안다 |
 | `ServiceID` · `DomainID` · `DeploymentID` · `AccountID` | 저장소가 준 번호 |
@@ -315,7 +316,7 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `ServiceInput` | 화면에서 받은 서비스 값 (값 객체들) |
 | `NewService` · `ServiceSettings` | 저장할 새 서비스 · 고칠 수 있는 값 |
 | `Service` | 서비스 하나의 지금 모습 — 비밀은 없다 |
-| `ServiceSecrets` | 배포에만 쓰는 비밀(env·볼륨·git 토큰·웹훅 시크릿). **`web`·`cli`는 이 타입을 쓸 수 없다** |
+| `ServiceSecrets` | 배포에만 쓰는 비밀(env·`.env` 파일·볼륨·git 토큰·웹훅 시크릿). **`web`·`cli`는 이 타입을 쓸 수 없다** |
 | `Domain` · `DomainInput` | 서비스에 붙은 주소 하나 · 붙일 주소 |
 | `Service.Created` · `Service.FromGit` | 서비스를 만든 때 · 소스가 저장소 주소인가(git push 웹훅을 기다린다) — 진단이 "하루가 지나도록 웹훅이 오지 않음"을 보는 데 쓴다 |
 | `LiveState` | 지금 도는 것 — 서비스 별칭, 요청을 받는 컨테이너, 서빙 중인 배포본, 포트, 직접 멈췄는지 |
@@ -846,8 +847,9 @@ type WorkFolder interface {
 }
 
 // BuildContextPacker는 빌드할 폴더를 묶는다 (.git·.dockerignore 제외).
+// extra는 폴더에 없어도 묶음에 넣을 파일(폴더 기준 경로 → 내용)이다 — .dockerignore와 상관없이 넣고, 같은 이름의 파일은 덮어쓴다.
 type BuildContextPacker interface {
-	Pack(folder string) io.ReadCloser
+	Pack(folder string, extra map[string][]byte) io.ReadCloser
 }
 
 // DockerfilePortReader는 Dockerfile의 EXPOSE에서 앱 포트를 찾는다. Dockerfile이 없으면 found가 거짓.
@@ -991,7 +993,7 @@ web → HookReceiver.Receive
 
 Deployer.Deploy
    DeployLock.TryLock → DeployHistoryStore.Start → DeployLog.Open
-   → VersionBuilder.Build     (RepoBuilder: WorkFolder · CodeDownloader · BuildContextPacker · ImageBuilder)
+   → VersionBuilder.Build     (RepoBuilder: WorkFolder · CodeDownloader · SecretStore(.env 파일) · BuildContextPacker · ImageBuilder)
    → VersionSwapper.Swap      (ContainerSwapper: ContainerStarter로 같은 별칭의 새 것 → PortChecker로 새 컨테이너 이름에 응답 확인)
    → LiveStateStore.Save → WebServerSync.SyncNow  (웹서버를 맞춘다 — 별칭은 그대로라 보통 바뀌는 것이 없다)
    → VersionSwapper.Retire    (그 뒤에야 옛 것을 끈다 · 맞추기가 실패했으면 둘 다 남긴다)
@@ -1111,7 +1113,7 @@ M4 전에 한다. 지금의 화면·배포 테스트가 회귀 테스트다 — 
 | `DeployLock.TryLock` | — | `why`가 비면 합치지 않는다 | 되돌리기는 "끝나고 한 번 더"로 합치면 안 된다 |
 | `siteMapBuilder` · `serviceViewer` | `DomainStore`를 씀 | 쓰지 않음 | `ServiceReader`가 주소까지 함께 준다 |
 | `Deployer`·`WebServerSync` 만들기 | — | `NewDeployer`는 `wait`, `NewWebServerSync`는 `run`을 함께 돌려준다 | 수명(멈추기·기다리기)은 조립(`app`)만 다룬다 — 인터페이스는 세 개·두 개 그대로 |
-| 저장된 env·볼륨 | — | `StoredEnvVars`·`StoredVolumes` | v1에서 온 값에 틀린 줄이 하나 있어도 나머지를 잃지 않게 |
+| 저장된 env·볼륨·`.env` 파일 | — | `StoredEnvVars`·`StoredVolumes`·`StoredEnvFile` | v1에서 온 값에 틀린 줄이 하나 있어도 나머지를 잃지 않게 |
 
 **동작이 바뀐 곳 (작게, 의도해서)**
 

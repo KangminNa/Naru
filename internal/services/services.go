@@ -117,7 +117,7 @@ func (e serviceEditor) Create(ctx context.Context, in model.ServiceInput) (model
 		return 0, err
 	}
 	if err := e.secrets.Set(ctx, id, model.ServiceSecrets{
-		Env: in.Env, Volumes: in.Volumes, GitToken: in.Token, WebhookSecret: e.random.New(24),
+		Env: in.Env, EnvFile: in.EnvFile, Volumes: in.Volumes, GitToken: in.Token, WebhookSecret: e.random.New(24),
 	}); err != nil {
 		return id, err
 	}
@@ -131,7 +131,7 @@ func (e serviceEditor) Create(ctx context.Context, in model.ServiceInput) (model
 }
 
 // Update는 설정을 고친다. 다시 배포해야 반영되는 것이 바뀌었으면 needsRedeploy가 참이다
-// (저장소·브랜치·폴더·토큰, 컨테이너라면 환경 변수·볼륨 — 컨테이너는 만들 때의 환경으로 돈다).
+// (저장소·브랜치·폴더·토큰·.env 파일, 컨테이너라면 환경 변수·볼륨 — 컨테이너는 만들 때의 환경으로 돈다).
 func (e serviceEditor) Update(ctx context.Context, id model.ServiceID, in model.ServiceInput) (bool, error) {
 	s, err := e.reader.Get(ctx, id)
 	if err != nil {
@@ -153,7 +153,8 @@ func (e serviceEditor) Update(ctx context.Context, id model.ServiceID, in model.
 	// 무엇이 바뀌었는지는 저장하기 전에 본다
 	deployable, container := tools.Builder != nil, tools.Destination.Find(s).Container
 	redeploy := deployable && (in.Source() != s.Source || in.Branch.String() != s.Branch ||
-		in.BuildPath.String() != s.BuildPath || in.Folder.String() != s.Folder || in.Token != "")
+		in.BuildPath.String() != s.BuildPath || in.Folder.String() != s.Folder || in.Token != "" ||
+		in.EnvFile.Text() != old.EnvFile.Text())
 	if container && (old.Env.Text() != in.Env.Text() || old.Volumes.Text() != in.Volumes.Text()) {
 		redeploy = true
 	}
@@ -169,7 +170,7 @@ func (e serviceEditor) Update(ctx context.Context, id model.ServiceID, in model.
 		return false, err
 	}
 	next := old
-	next.Env, next.Volumes = in.Env, in.Volumes
+	next.Env, next.EnvFile, next.Volumes = in.Env, in.EnvFile, in.Volumes
 	if in.Token != "" {
 		next.GitToken = in.Token
 	} else if in.ClearToken {

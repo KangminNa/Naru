@@ -185,6 +185,10 @@
       <small>{{t "service.port.hint"}}</small></label>
     <label class="field"><span>{{t "field.env"}}</span><textarea class="input mono" name="env" rows="5">{{$f.Env}}</textarea>
       <small>{{t "env.hint.settings"}}</small></label>
+    {{if eq (print $s.Kind) "repo"}}
+    <label class="field"><span>{{t "field.envfile"}}</span><textarea class="input mono" name="env_file" rows="4">{{$f.EnvFile}}</textarea>
+      <small>{{t "envfile.hint.settings"}}</small></label>
+    {{end}}
     <details class="more"><summary>{{t "field.volumes"}}</summary><div class="form">
       <label class="field"><span>{{t "field.volumes"}}</span><textarea class="input mono" name="volumes" rows="2">{{$f.Volumes}}</textarea></label>
     </div></details>

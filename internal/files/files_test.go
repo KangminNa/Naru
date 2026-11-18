@@ -121,6 +121,25 @@ func tarFiles(t *testing.T, dir string, extra map[string][]byte) map[string]stri
 	return out
 }
 
+// buildx는 stdin의 첫 1024바이트에서 첫 항목을 읽어 tar인지 가린다 — 맨 앞 파일 이름이 길거나 한글이어도 tar로 보여야 한다.
+func TestPackLooksLikeATarFromTheFirstKilobyte(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, map[string]string{
+		"0" + strings.Repeat("긴이름", 20) + ".txt": "x", // 이 폴더에서 맨 앞 — USTAR에 들어가지 않는 이름
+		"Dockerfile": "FROM scratch",
+	})
+	rc := TarPacker{}.Pack(dir, nil)
+	defer rc.Close()
+	raw, _ := io.ReadAll(rc)
+	h, err := tar.NewReader(bytes.NewReader(raw[:1024])).Next()
+	if err != nil || h.Name != "./" {
+		t.Fatalf("the first kilobyte holds a whole entry: %v %+v", err, h)
+	}
+	if names := tarNames(t, dir); len(names) != 3 || !strings.HasPrefix(names[1], "0긴이름") {
+		t.Fatalf("everything is still there: %v", names)
+	}
+}
+
 func TestPackAddsTheEnvFileWithoutWritingIt(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, map[string]string{
@@ -139,7 +158,7 @@ func TestPackAddsTheEnvFileWithoutWritingIt(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(dir, ".env")); string(b) != "FROM_REPO=1\n" {
 		t.Fatalf("nothing is written to the folder: %q", b)
 	}
-	if got := tarFiles(t, dir, nil); got[".env"] != "" || len(got) != 2 {
+	if got := tarFiles(t, dir, nil); got[".env"] != "" || len(got) != 3 {
 		t.Fatalf("without extra the folder is packed as before: %v", got)
 	}
 }

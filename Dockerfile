@@ -8,9 +8,14 @@ COPY internal ./internal
 ARG VERSION=2.0.0-dev
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/naru ./cmd/naru
 
+# buildx: 저장소의 Dockerfile을 BuildKit으로 빌드한다 — 로컬의 docker build와 같은 빌더 (docker CLI는 넣지 않는다).
+# 버전을 올리면 scripts/buildx-check.sh를 돌린다.
+FROM docker/buildx-bin:0.38.2 AS buildx
+
 FROM alpine:3
 # git: 저장소를 가져온다 (토큰은 명령줄·설정 파일에 남기지 않는다)
 RUN apk add --no-cache ca-certificates tzdata git
+COPY --from=buildx /buildx /usr/local/libexec/naru/buildx
 COPY --from=build /out/naru /usr/local/bin/naru
 ENV NARU_DATA_DIR=/data NARU_LISTEN=:8080
 VOLUME /data

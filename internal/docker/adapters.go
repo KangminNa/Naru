@@ -20,16 +20,6 @@ const (
 	stopGrace       = 10 * time.Second
 )
 
-// Builder는 빌드할 폴더(묶은 것)로 이미지를 만든다.
-type Builder struct{ c *Client }
-
-func NewBuilder(c *Client) Builder { return Builder{c} }
-
-func (b Builder) Build(ctx context.Context, folder io.Reader, tag string, log io.Writer) (model.ImageID, error) {
-	id, err := b.c.build(ctx, folder, tag, "", log)
-	return model.ImageID(id), err
-}
-
 // Puller는 이미지를 받고 그 ID·열어둔 포트를 알려준다.
 type Puller struct{ c *Client }
 

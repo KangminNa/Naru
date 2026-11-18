@@ -84,7 +84,7 @@ func apiMessage(raw []byte) string {
 	return strings.TrimSpace(string(raw))
 }
 
-// streamMessage는 build·pull이 한 줄씩 보내는 JSON이다.
+// streamMessage는 pull이 한 줄씩 보내는 JSON이다.
 type streamMessage struct {
 	Stream string `json:"stream"`
 	Status string `json:"status"`
@@ -121,31 +121,6 @@ func follow(r io.Reader, log io.Writer) (imageID string, err error) {
 			lastStatus = m.Status
 		}
 	}
-}
-
-// Build는 tar로 묶은 빌드 컨텍스트로 이미지를 만든다. 진행은 log로 흐른다.
-func (c *Client) build(ctx context.Context, tarball io.Reader, tag, dockerfile string, log io.Writer) (string, error) {
-	q := url.Values{"t": {tag}, "rm": {"1"}, "forcerm": {"1"}}
-	if dockerfile != "" {
-		q.Set("dockerfile", dockerfile)
-	}
-	res, err := c.stream(ctx, http.MethodPost, "/build?"+q.Encode(), tarball, "application/x-tar")
-	if err != nil {
-		return "", err
-	}
-	defer res.Body.Close()
-	id, err := follow(res.Body, log)
-	if err != nil {
-		return "", err
-	}
-	if id == "" { // 오래된 빌더는 aux를 주지 않는다 — 태그로 찾는다
-		img, ierr := c.image(ctx, tag)
-		if ierr != nil {
-			return "", ierr
-		}
-		id = img.ID
-	}
-	return id, nil
 }
 
 // Pull은 이미지를 받는다. ref에는 태그나 다이제스트가 붙어 있어도 된다.

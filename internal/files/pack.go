@@ -79,6 +79,11 @@ func matchPathOrParent(pattern, rel string) bool {
 func writeTar(dir string, extra map[string][]byte, w io.Writer) error {
 	rules := readIgnore(dir)
 	tw := tar.NewWriter(w)
+	// 첫 항목은 늘 짧은 USTAR(./)다. buildx는 stdin의 첫 1024바이트에서 첫 항목을 읽어 tar인지 가리는데,
+	// 이름이 길거나 한글인 파일이 맨 앞이면 PAX 머리말이 붙어 1024바이트를 넘고 — 그러면 묶음을 Dockerfile로 읽는다.
+	if err := tw.WriteHeader(&tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755, ModTime: time.Unix(0, 0), Format: tar.FormatUSTAR}); err != nil {
+		return err
+	}
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err

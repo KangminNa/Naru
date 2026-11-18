@@ -48,6 +48,7 @@ type Config struct {
 	DataDir        string // NARU_DATA_DIR, 기본 ./data
 	ProcDir        string // NARU_PROC_DIR, 기본 /proc
 	DockerSocket   string // NARU_DOCKER_SOCKET, 기본 /var/run/docker.sock
+	Buildx         string // 이미지를 만드는 buildx 실행 파일 — 환경 변수 없음, 기본은 Naru 이미지 안의 /usr/local/libexec/naru/buildx
 	CaddySocket    string // NARU_CADDY_ADMIN — 웹서버 관리 소켓, 기본 /run/caddy/admin.sock
 	SelfUpstream   string // NARU_SELF_UPSTREAM — 웹서버가 관리 화면에 닿는 주소, 기본 naru:8080
 	InternalTLS    bool   // NARU_TLS=internal — 개발용. 공개 CA 대신 내부 CA로 인증서
@@ -119,6 +120,7 @@ func (c Config) resolved() (Config, error) {
 		}
 	}
 	fill(&c.Listen, ":8080")
+	fill(&c.Buildx, "/usr/local/libexec/naru/buildx")
 	fill(&c.CaddySocket, "/run/caddy/admin.sock")
 	fill(&c.SelfUpstream, "naru:8080")
 	fill(&c.CaddySites, "/srv/sites")
@@ -183,7 +185,8 @@ func RealOutside(cfg Config) Outside {
 	d := docker.New(cfg.DockerSocket)
 	containers := docker.NewContainers(d)
 	return Outside{
-		Builder: docker.NewBuilder(d), Puller: docker.NewPuller(d), Images: docker.NewImages(d),
+		Builder: docker.NewBuildxBuilder(cfg.Buildx, cfg.DockerSocket, filepath.Join(cfg.DataDir, "work", ".buildx")),
+		Puller:  docker.NewPuller(d), Images: docker.NewImages(d),
 		Starter: containers, Remover: containers, Switch: containers, Watcher: containers, AppLogs: containers, Usage: containers, Networks: containers,
 		Code: git.Downloader{}, Ports: netcheck.TCP{}, DNS: netcheck.NewDNS(nil),
 		Stats:   stats.NewProcSampler(cfg.ProcDir, cfg.DataDir),

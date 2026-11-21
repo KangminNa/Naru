@@ -16,7 +16,7 @@ type Services struct{ db *DB }
 func NewServices(db *DB) Services { return Services{db} }
 
 const serviceColumns = `id, name, kind, source, branch, build_path, folder, upstream, port, auto_deploy,
-	container, instance, release, stopped, hook_at, hook_result, created_at`
+	container, instance, release, stopped, hook_at, hook_result, created_at, networks`
 
 func scanService(row interface{ Scan(...any) error }) (model.Service, error) {
 	var (
@@ -27,7 +27,7 @@ func scanService(row interface{ Scan(...any) error }) (model.Service, error) {
 		alias, inst, release string
 	)
 	err := row.Scan(&id, &name, &kind, &s.Source, &s.Branch, &s.BuildPath, &s.Folder, &s.External, &port, &s.AutoDeploy,
-		&alias, &inst, &release, &s.Live.Stopped, &hookAt, &hookRes, &created)
+		&alias, &inst, &release, &s.Live.Stopped, &hookAt, &hookRes, &created, &s.Networks)
 	if err != nil {
 		return s, err
 	}
@@ -123,9 +123,9 @@ func (r Services) Create(ctx context.Context, s model.NewService) (model.Service
 	if s.ID != 0 {
 		id = int64(s.ID)
 	}
-	res, err := r.db.sql.ExecContext(ctx, `INSERT INTO services (id, name, kind, source, branch, build_path, folder, upstream, port, auto_deploy, container)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, s.Name.String(), string(s.Kind), s.Source, s.Branch, s.BuildPath, s.Folder, s.External, int(s.Port), s.AutoDeploy, s.Alias)
+	res, err := r.db.sql.ExecContext(ctx, `INSERT INTO services (id, name, kind, source, branch, build_path, folder, upstream, port, auto_deploy, container, networks)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, s.Name.String(), string(s.Kind), s.Source, s.Branch, s.BuildPath, s.Folder, s.External, int(s.Port), s.AutoDeploy, s.Alias, s.Networks)
 	if err != nil {
 		return 0, err
 	}
@@ -134,8 +134,8 @@ func (r Services) Create(ctx context.Context, s model.NewService) (model.Service
 }
 
 func (r Services) Update(ctx context.Context, id model.ServiceID, s model.ServiceSettings) error {
-	res, err := r.db.sql.ExecContext(ctx, `UPDATE services SET source = ?, branch = ?, build_path = ?, folder = ?, upstream = ?, port = ?, auto_deploy = ? WHERE id = ?`,
-		s.Source, s.Branch, s.BuildPath, s.Folder, s.External, int(s.Port), s.AutoDeploy, int64(id))
+	res, err := r.db.sql.ExecContext(ctx, `UPDATE services SET source = ?, branch = ?, build_path = ?, folder = ?, upstream = ?, port = ?, auto_deploy = ?, networks = ? WHERE id = ?`,
+		s.Source, s.Branch, s.BuildPath, s.Folder, s.External, int(s.Port), s.AutoDeploy, s.Networks, int64(id))
 	if err != nil {
 		return err
 	}

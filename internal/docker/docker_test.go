@@ -42,11 +42,28 @@ func TestContainers(t *testing.T) {
 		}
 		w.Write([]byte(`[{"Names":["/shelf-blog"],"Image":"shelf-app-blog","State":"running","Status":"Up 3 hours",
 			"Ports":[{"PrivatePort":3000,"Type":"tcp"},{"IP":"0.0.0.0","PrivatePort":3000,"PublicPort":3893,"Type":"tcp"},{"PrivatePort":53,"Type":"udp"}]},
-			{"Names":["/naru-api"],"Image":"ghcr.io/me/api","State":"restarting","Status":"Restarting (1) 5 seconds ago"}]`))
+			{"Names":["/naru-api"],"Image":"ghcr.io/me/api","State":"restarting","Status":"Restarting (1) 5 seconds ago",
+			 "Labels":{"naru.service":"7","naru.deployment":"3"},"NetworkSettings":{"Networks":{"naru-net":{}}}},
+			{"Names":["/cairn-web-1"],"Image":"cairn-web","State":"running","Status":"Up 3 days","Ports":[{"PrivatePort":3000,"Type":"tcp"}],
+			 "Labels":{"com.docker.compose.project":"cairn","com.docker.compose.service":"web"},
+			 "NetworkSettings":{"Networks":{"shelf-net":{},"cairn_default":{},"bridge":{}}}}]`))
 	}))
 	got, err := New(sock).containers(context.Background())
 	if err != nil {
 		t.Fatal(err)
+	}
+	delete(got, "cairn-web-1")
+	// 다른 컨테이너 목록이 쓰는 것 — 이미지, compose 묶음, 붙은 네트워크, Naru 서비스 번호
+	all, err := NewContainers(New(sock)).All(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := all["cairn-web-1"]
+	if web.Image != "cairn-web" || web.Project != "cairn" || web.Service != 0 || all["naru-api"].Service != 7 || all["naru-api"].Project != "" {
+		t.Fatalf("%+v %+v", web, all["naru-api"])
+	}
+	if n := web.Networks; len(n) != 3 || n[0] != (model.DockerNetwork{Name: "bridge"}) || n[1] != (model.DockerNetwork{Name: "cairn_default", UserDefined: true}) {
+		t.Fatalf("networks by name, the default ones marked: %+v", n)
 	}
 	if got["shelf-blog"].State != Running || got["naru-api"].State != "restarting" || len(got) != 2 {
 		t.Fatalf("%+v", got)
@@ -151,6 +168,65 @@ func TestStartCreatesTheNetwork(t *testing.T) {
 	}
 	if strings.Count(strings.Join(calls, " "), "/networks/create") != 1 {
 		t.Fatalf("the network is created once: %v", calls)
+	}
+}
+
+// 다른 네트워크에는 만든 뒤, 띄우기 전에 같은 별칭으로 붙인다. 없는 네트워크면 만들기 전에 말한다 —
+// Docker는 띄우지 않은 컨테이너를 없는 네트워크에 붙여도 받아 두고 start에서야 실패한다. 붙이지 못하면 만든 것을 지운다.
+func TestStartJoinsTheOtherNetworksBeforeStarting(t *testing.T) {
+	var calls []string
+	var joinBody string
+	sock := fakeDocker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && (r.URL.Path == "/networks/naru-net" || r.URL.Path == "/networks/cairn_default" || r.URL.Path == "/networks/locked"):
+			w.Write([]byte(`{"Name":"x"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/networks/gone":
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"message":"network gone not found"}`))
+		case r.URL.Path == "/containers/create":
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"Id":"abc"}`))
+		case r.URL.Path == "/networks/cairn_default/connect":
+			b, _ := io.ReadAll(r.Body)
+			joinBody = string(b)
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/networks/locked/connect":
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"message":"operation not permitted"}`))
+		case strings.HasSuffix(r.URL.Path, "/start"), r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	c := NewContainers(New(sock))
+	spec := model.ContainerSpec{Name: "naru-x-1", Image: "img", Network: "naru-net", Aliases: []string{"naru-x"}, ExtraNetworks: []string{"naru-net", "cairn_default"}}
+	if err := c.Start(context.Background(), spec); err != nil {
+		t.Fatalf("err=%v calls=%v", err, calls)
+	}
+	got := strings.Join(calls, " ")
+	if i, j := strings.Index(got, "/networks/cairn_default/connect"), strings.Index(got, "/containers/naru-x-1/start"); i < 0 || j < i || strings.Contains(got, "/networks/naru-net/connect") {
+		t.Fatalf("joined after create and before start, the app network not twice: %v", calls)
+	}
+	if !strings.Contains(joinBody, `"Container":"naru-x-1"`) || !strings.Contains(joinBody, `"Aliases":["naru-x"]`) {
+		t.Fatalf("same alias on the other network: %s", joinBody)
+	}
+
+	calls = nil
+	spec.ExtraNetworks = []string{"gone"}
+	err := c.Start(context.Background(), spec)
+	got = strings.Join(calls, " ")
+	if err == nil || !strings.Contains(err.Error(), `네트워크 "gone"가 이 서버에 없어요`) || strings.Contains(got, "/containers/create") {
+		t.Fatalf("a missing network is named before anything is created: %v %v", err, calls)
+	}
+
+	calls = nil
+	spec.ExtraNetworks = []string{"locked"}
+	err = c.Start(context.Background(), spec)
+	got = strings.Join(calls, " ")
+	if err == nil || !strings.Contains(err.Error(), `"locked"`) || !strings.Contains(got, "DELETE /containers/naru-x-1") || strings.Contains(got, "/start") {
+		t.Fatalf("a failed join removes what was created and never starts it: %v %v", err, calls)
 	}
 }
 

@@ -44,6 +44,9 @@ type Container struct {
 	State  State
 	Status string // "Up 3 hours", "Exited (1) 2 minutes ago"
 	Ports  []int  // 이미지가 연 TCP 포트 (EXPOSE — 바깥에 열지 않은 것도)
+
+	Labels   map[string]string
+	Networks []string // 붙은 네트워크 이름 (이름순)
 }
 
 // Ping은 Docker에 닿는가.
@@ -63,6 +66,10 @@ func (c *Client) containers(ctx context.Context) (map[string]Container, error) {
 			PrivatePort int
 			Type        string
 		}
+		Labels          map[string]string
+		NetworkSettings struct {
+			Networks map[string]json.RawMessage
+		}
 	}
 	if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("docker: decode containers: %w", err)
@@ -77,7 +84,12 @@ func (c *Client) containers(ctx context.Context) (map[string]Container, error) {
 					ports = append(ports, p.PrivatePort)
 				}
 			}
-			out[name] = Container{Name: name, Image: r.Image, State: State(r.State), Status: r.Status, Ports: ports}
+			nets := make([]string, 0, len(r.NetworkSettings.Networks))
+			for n := range r.NetworkSettings.Networks {
+				nets = append(nets, n)
+			}
+			slices.Sort(nets)
+			out[name] = Container{Name: name, Image: r.Image, State: State(r.State), Status: r.Status, Ports: ports, Labels: r.Labels, Networks: nets}
 		}
 	}
 	return out, nil

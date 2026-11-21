@@ -46,6 +46,7 @@ type Deps struct {
 	Launcher    contract.ServiceLauncher
 	Editor      contract.ServiceEditor
 	Viewer      contract.ServiceViewer
+	Finder      contract.ContainerFinder
 	Deployer    contract.Deployer
 	Control     contract.ServiceControl
 	Hooks       contract.HookReceiver

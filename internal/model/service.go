@@ -52,6 +52,7 @@ type ServiceInput struct {
 	Env        EnvVars
 	EnvFile    EnvFile // 저장소 종류만 — 빌드 폴더의 .env
 	Volumes    Volumes
+	Networks   NetworkNames // 컨테이너 종류만 — 앱 네트워크 말고 더 붙일 네트워크
 	AutoDeploy bool
 }
 
@@ -88,6 +89,7 @@ type Service struct {
 	Folder     string
 	External   string
 	Port       Port
+	Networks   string // 앱 네트워크 말고 더 붙일 네트워크 이름들 (빈칸으로 나눔)
 	AutoDeploy bool
 	Live       LiveState
 	HookLog    HookLog
@@ -152,6 +154,7 @@ type NewService struct {
 	Folder     string
 	External   string
 	Port       Port
+	Networks   string
 	AutoDeploy bool
 	Alias      string
 }
@@ -164,6 +167,7 @@ type ServiceSettings struct {
 	Folder     string
 	External   string
 	Port       Port
+	Networks   string
 	AutoDeploy bool
 }
 

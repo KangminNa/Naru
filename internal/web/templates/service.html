@@ -189,8 +189,12 @@
     <label class="field"><span>{{t "field.envfile"}}</span><textarea class="input mono" name="env_file" rows="4">{{$f.EnvFile}}</textarea>
       <small>{{t "envfile.hint.settings"}}</small></label>
     {{end}}
-    <details class="more"><summary>{{t "field.volumes"}}</summary><div class="form">
+    <details class="more"{{if $f.Networks}} open{{end}}><summary>{{t "service.more"}}</summary><div class="form">
       <label class="field"><span>{{t "field.volumes"}}</span><textarea class="input mono" name="volumes" rows="2">{{$f.Volumes}}</textarea></label>
+      <label class="field"><span>{{t "field.networks"}}</span>
+        <input class="input mono" name="networks" value="{{$f.Networks}}" list="naru-networks">
+        {{with $.Data.Networks}}<datalist id="naru-networks">{{range .}}<option value="{{.}}">{{end}}</datalist>{{end}}
+        <small>{{t "networks.hint"}}</small></label>
     </div></details>
     {{end}}
     {{if $.Data.Deployable}}

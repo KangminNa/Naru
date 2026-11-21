@@ -609,6 +609,22 @@ func TestStopMarksTheServiceStopped(t *testing.T) {
 	}
 }
 
+// 서비스의 "다른 네트워크"는 새 컨테이너에 그대로 간다 — 되돌릴 때도.
+func TestTheNewContainerAlsoJoinsTheOtherNetworks(t *testing.T) {
+	r := newRig(t)
+	r.docker.images["me/app"] = model.ImageDetails{ID: "sha256:v", Ports: []model.Port{80}}
+	id := r.create(model.NewService{Name: name("app"), Kind: model.KindImage, Source: "me/app", Networks: "cairn_default db-net"}, "")
+	if dep := r.deploy(id); dep.Status != model.DeploySuccess {
+		t.Fatalf("%s", dep.Log)
+	}
+	r.docker.mu.Lock()
+	spec := r.docker.containers["naru-app-1"].spec
+	r.docker.mu.Unlock()
+	if strings.Join(spec.ExtraNetworks, " ") != "cairn_default db-net" || spec.Network != "naru-net" {
+		t.Fatalf("%+v", spec)
+	}
+}
+
 func TestEnvAndVolumes(t *testing.T) {
 	if _, _, err := model.ParseEnvVars("A=1\nbad\n"); err == nil {
 		t.Fatal("a line without = is refused on input")

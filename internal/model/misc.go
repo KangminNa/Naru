@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // ── 계정 ─────────────────────────────────
 
@@ -55,6 +58,28 @@ type ServiceCard struct {
 	Usage  *ResourceUsage // 지켜보기가 읽은 CPU·메모리 (실행 중인 컨테이너만, 없으면 nil)
 }
 
+// OtherContainer는 Naru가 띄우지 않은, 이 서버의 컨테이너 하나다. Naru는 보기만 한다.
+type OtherContainer struct {
+	Name       string
+	Image      string
+	Running    bool
+	Status     string // "Up 3 days", "Exited (0) 5 days ago"
+	Ports      []Port
+	Project    string    // compose 묶음 — 없으면 빈 값
+	Networks   []string  // 사용자 정의 네트워크 (이름순)
+	OnlyBridge bool      // 돌고 있는데 사용자 정의 네트워크에 없다 — 웹서버가 이름으로 닿지 못한다
+	Linked     ServiceID // 이 컨테이너로 보내는 외부 연결 서비스 (없으면 0)
+	LinkedName string
+}
+
+// Upstream은 외부 연결 칸에 적을 "이름:포트"다. 포트를 모르면 "이름:".
+func (c OtherContainer) Upstream() string {
+	if len(c.Ports) > 0 {
+		return c.Name + ":" + strconv.Itoa(int(c.Ports[0]))
+	}
+	return c.Name + ":"
+}
+
 // HomeView는 홈 화면이다.
 type HomeView struct {
 	Cards      []ServiceCard
@@ -81,6 +106,7 @@ type ServiceForm struct {
 	EnvText     string
 	EnvFileText string
 	Volumes     string
+	Networks    string
 	HasToken    bool
 }
 

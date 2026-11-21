@@ -111,7 +111,7 @@ func (e serviceEditor) Create(ctx context.Context, in model.ServiceInput) (model
 	}
 	id, err := e.store.Create(ctx, model.NewService{
 		Name: name, Kind: in.Kind, Source: in.Source(), Branch: in.Branch.String(), BuildPath: in.BuildPath.String(),
-		Folder: in.Folder.String(), External: in.External.String(), Port: in.Port, AutoDeploy: true,
+		Folder: in.Folder.String(), External: in.External.String(), Port: in.Port, Networks: in.Networks.String(), AutoDeploy: true,
 	})
 	if err != nil {
 		return 0, err
@@ -131,7 +131,7 @@ func (e serviceEditor) Create(ctx context.Context, in model.ServiceInput) (model
 }
 
 // Update는 설정을 고친다. 다시 배포해야 반영되는 것이 바뀌었으면 needsRedeploy가 참이다
-// (저장소·브랜치·폴더·토큰·.env 파일, 컨테이너라면 환경 변수·볼륨 — 컨테이너는 만들 때의 환경으로 돈다).
+// (저장소·브랜치·폴더·토큰·.env 파일, 컨테이너라면 환경 변수·볼륨·다른 네트워크 — 컨테이너는 만들 때의 환경으로 돈다).
 func (e serviceEditor) Update(ctx context.Context, id model.ServiceID, in model.ServiceInput) (bool, error) {
 	s, err := e.reader.Get(ctx, id)
 	if err != nil {
@@ -155,7 +155,7 @@ func (e serviceEditor) Update(ctx context.Context, id model.ServiceID, in model.
 	redeploy := deployable && (in.Source() != s.Source || in.Branch.String() != s.Branch ||
 		in.BuildPath.String() != s.BuildPath || in.Folder.String() != s.Folder || in.Token != "" ||
 		in.EnvFile.Text() != old.EnvFile.Text())
-	if container && (old.Env.Text() != in.Env.Text() || old.Volumes.Text() != in.Volumes.Text()) {
+	if container && (old.Env.Text() != in.Env.Text() || old.Volumes.Text() != in.Volumes.Text() || in.Networks.String() != s.Networks) {
 		redeploy = true
 	}
 	auto := in.AutoDeploy
@@ -165,7 +165,7 @@ func (e serviceEditor) Update(ctx context.Context, id model.ServiceID, in model.
 
 	if err := e.store.Update(ctx, id, model.ServiceSettings{
 		Source: in.Source(), Branch: in.Branch.String(), BuildPath: in.BuildPath.String(), Folder: in.Folder.String(),
-		External: in.External.String(), Port: in.Port, AutoDeploy: auto,
+		External: in.External.String(), Port: in.Port, Networks: in.Networks.String(), AutoDeploy: auto,
 	}); err != nil {
 		return false, err
 	}

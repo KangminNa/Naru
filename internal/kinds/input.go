@@ -41,7 +41,7 @@ func (StaticInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
 		in.Branch = model.DefaultBranch()
 	}
 	in.Image, in.External, in.BuildPath, in.Port = model.ImageRef{}, model.ExternalAddress{}, model.FolderPath{}, 0
-	in.Env, in.EnvFile, in.Volumes = model.EnvVars{}, model.EnvFile{}, model.Volumes{}
+	in.Env, in.EnvFile, in.Volumes, in.Networks = model.EnvVars{}, model.EnvFile{}, model.Volumes{}, model.NetworkNames{}
 	return in, nil
 }
 
@@ -54,6 +54,6 @@ func (ExternalInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
 	}
 	in.Repo, in.Branch, in.Image = model.RepoURL{}, model.Branch{}, model.ImageRef{}
 	in.Folder, in.BuildPath, in.Port, in.AutoDeploy = model.FolderPath{}, model.FolderPath{}, 0, false
-	in.Env, in.EnvFile, in.Volumes = model.EnvVars{}, model.EnvFile{}, model.Volumes{}
+	in.Env, in.EnvFile, in.Volumes, in.Networks = model.EnvVars{}, model.EnvFile{}, model.Volumes{}, model.NetworkNames{}
 	return in, nil
 }

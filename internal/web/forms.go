@@ -25,6 +25,7 @@ type serviceForm struct {
 	Env        string
 	EnvFile    string
 	Volumes    string
+	Networks   string
 	AutoDeploy bool
 }
 
@@ -44,6 +45,7 @@ func readServiceForm(r *http.Request) serviceForm {
 		Env:        strings.ReplaceAll(r.FormValue("env"), "\r\n", "\n"),
 		EnvFile:    strings.ReplaceAll(r.FormValue("env_file"), "\r\n", "\n"),
 		Volumes:    strings.ReplaceAll(r.FormValue("volumes"), "\r\n", "\n"),
+		Networks:   strings.TrimSpace(r.FormValue("networks")),
 		AutoDeploy: r.FormValue("auto_deploy") == "1",
 	}
 }
@@ -56,7 +58,7 @@ func formFrom(f model.ServiceForm) serviceForm {
 	}
 	return serviceForm{
 		Source: f.Source, Branch: f.Branch, BuildPath: f.BuildPath, Folder: f.Folder, Upstream: f.External,
-		Port: port, AutoDeploy: f.AutoDeploy, Env: f.EnvText, EnvFile: f.EnvFileText, Volumes: f.Volumes,
+		Port: port, AutoDeploy: f.AutoDeploy, Env: f.EnvText, EnvFile: f.EnvFileText, Volumes: f.Volumes, Networks: f.Networks,
 	}
 }
 
@@ -100,6 +102,9 @@ func (f serviceForm) input(kind model.KindName) (model.ServiceInput, []model.Env
 		return in, nil, err
 	}
 	if in.Volumes, err = model.ParseVolumes(f.Volumes); err != nil {
+		return in, nil, err
+	}
+	if in.Networks, err = model.ParseNetworkNames(f.Networks); err != nil {
 		return in, nil, err
 	}
 	if in.Domain, err = model.ParseOptionalDomainName(f.Domain); err != nil {

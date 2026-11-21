@@ -81,6 +81,10 @@
         <label class="field"><span>{{t "field.volumes"}}</span>
           <textarea class="input mono" name="volumes" rows="2" placeholder="/srv/app-data:/data">{{$f.Volumes}}</textarea>
           <small>{{t "new.volumes.hint"}}</small></label>
+        <label class="field"><span>{{t "field.networks"}}</span>
+          <input class="input mono" name="networks" value="{{$f.Networks}}" placeholder="myapp_default" list="naru-networks">
+          {{with $.Data.Networks}}<datalist id="naru-networks">{{range .}}<option value="{{.}}">{{end}}</datalist>{{end}}
+          <small>{{t "networks.hint"}}</small></label>
         {{end}}
       </div>
     </details>

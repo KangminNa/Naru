@@ -144,7 +144,8 @@
 
 | 인터페이스 | 하는 일 | 구현 |
 |---|---|---|
-| `ServiceViewer` | 화면에 보여줄 서비스 모습(홈 카드·상세·배포 기록·로그, 외부 연결 칸에 제안할 이 서버의 다른 컨테이너)을 모은다. 비밀은 담지 않는다. 로그는 앱 출력과 받은 요청을 시간순으로 합친다 (M6-2) | `serviceViewer` |
+| `ServiceViewer` | 화면에 보여줄 서비스 모습(홈 카드·상세·배포 기록·로그)을 모은다. 비밀은 담지 않는다. 로그는 앱 출력과 받은 요청을 시간순으로 합친다 (M6-2) | `serviceViewer` |
+| `ContainerFinder` | Naru가 띄우지 않은, 이 서버의 다른 컨테이너를 찾는다 — 홈의 목록(compose 묶음별, 어느 외부 연결 서비스가 보내는지, 기본 bridge에만 있는지)과 외부 연결 칸의 제안. **보기만 한다** | `containerFinder` |
 | `ServerStats` | 서버의 CPU·메모리·디스크를 알려준다 | `stats.ProcSampler` |
 
 ### I. 웹서버 설정 정하기 — `websettings` (M5)
@@ -326,7 +327,9 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `Commit` · `ImageID` · `ImageDetails` | 가져온 커밋 · Docker 이미지 ID · 받은 이미지의 ID와 열어둔 포트 |
 | `SiteFolder` | 정적 사이트 배포본 하나 (서비스 이름 + 배포 번호) |
 | `CodeSource` | 내려받을 코드 — 저장소·브랜치·토큰 |
-| `ContainerSpec` · `ContainerState` · `ContainerStates` | 띄울 컨테이너 · 컨테이너 하나의 상태(이미지가 연 포트 포함) · 이름별 상태 (nil이면 Docker를 읽지 못함) |
+| `ContainerSpec` · `ContainerState` · `ContainerStates` | 띄울 컨테이너(앱 네트워크 말고 더 붙일 네트워크 포함) · 컨테이너 하나의 상태(이미지가 연 포트, 이미지 이름, compose 묶음, 붙은 네트워크, Naru 서비스 번호 포함) · 이름별 상태 (nil이면 Docker를 읽지 못함) |
+| `NetworkNames` | 앱 컨테이너를 더 붙일 Docker 네트워크 이름들 — 이름 모양만 받고 `bridge`·`host`·`none`은 거절, 8개까지. 그 네트워크의 DB 같은 컨테이너에 앱이 닿게 한다 |
+| `OtherContainer` | Naru가 띄우지 않은 이 서버의 컨테이너 하나 — 이름·이미지·상태·포트·compose 묶음·사용자 정의 네트워크, 기본 bridge에만 있는지, 이 컨테이너로 보내는 외부 연결 서비스 |
 | `Deployment` | 배포 한 번의 기록 |
 | `DeployStatus` | 진행 중 · 성공 · 실패 |
 | `DeployReason` | 왜 배포했나 — 직접 · push · 처음 올림 · 되돌림 |
@@ -786,7 +789,12 @@ type ServiceViewer interface {
 	Detail(ctx context.Context, id model.ServiceID) (model.ServiceView, error)
 	Deployment(ctx context.Context, id model.ServiceID, d model.DeploymentID) (model.DeploymentView, error)
 	Logs(ctx context.Context, id model.ServiceID, f model.LogFilter) (model.LogsView, error) // 앱 출력과 요청을 시간순으로
-	ContainerChoices(ctx context.Context) ([]string, error)                                  // 외부 연결 칸에 제안할 이 서버의 다른 컨테이너 ("이름:포트")
+}
+
+// ContainerFinder는 Naru가 띄우지 않은, 이 서버의 다른 컨테이너를 찾는다. 보기만 한다 — 끄거나 지우지 않는다.
+type ContainerFinder interface {
+	Others(ctx context.Context) ([]model.OtherContainer, error) // compose 묶음별·이름순. Docker를 읽지 못하면 비어 있다
+	Choices(ctx context.Context) ([]string, error)              // 외부 연결 칸에 제안할 돌고 있는 것 ("이름:포트")
 }
 
 // ServerStats는 서버의 CPU·메모리·디스크를 알려준다.
@@ -959,12 +967,13 @@ type RandomTokens interface {
 | `siteMapBuilder` | ServiceReader · KindLookup · AdminDomainSetting · CertEmailSetting · SetupProgress · CertificateReader · Clock · WebSettingsStore |
 | `webServerSync` | SiteMapBuilder · ConfigWriter · ConfigSender(`AdminSocketGuard`로 감싼 것) · WebServerReach · EventSubscriber |
 | `webServerReach` | NetworkJoiner (+ 웹서버 컨테이너 이름·앱 네트워크 이름은 만들 때 받는다) |
+| `containerFinder` | ServiceReader · ContainerWatcher (+ 숨길 컨테이너 이름 — Naru 자신과 웹서버 — 은 만들 때 받는다) |
 | `serviceViewer` | ServiceReader · SecretStore · DeployHistoryReader · ContainerWatcher · KindLookup · AdminDomainSetting · Deployer · CertificateReader · Clock · WebSettingsStore · ContainerLogReader · AccessLogReader · HealthWatcher |
 | `webSettingsEditor` | ServiceReader · WebSettingsStore · SnippetCompiler · LoginHasher · WebServerSync |
 | `healthWatcher` | ServiceReader · KindLookup · ContainerWatcher · PortChecker · Deployer · WebServerSync · CertificateReader · AdminDomainSetting · Diagnoser · UsageReader · Clock · EventPublisher |
 | `diagnoser` | KindLookup · PortChecker · DNSChecker · AdminDomainSetting · CertificateReader · WebServerSync · Clock (+ `NARU_PUBLIC_IP` 값은 만들 때 받는다) |
 | `alerts` | ChannelStore · DeliveryLog · AlertSender · ServiceReader · EventSubscriber · Clock |
-| `web` | LoginManager · AccountManager · SetupKey · AdminDomainSetting · CertEmailSetting · SetupProgress · ServiceLauncher · ServiceEditor · ServiceViewer · Deployer · ServiceControl · HookReceiver · ServerStats · WebServerSync · DNSChecker · CertificateReader · Clock · WebSettingsEditor · NginxTranslator · AlertSettings |
+| `web` | LoginManager · AccountManager · SetupKey · AdminDomainSetting · CertEmailSetting · SetupProgress · ServiceLauncher · ServiceEditor · ServiceViewer · ContainerFinder · Deployer · ServiceControl · HookReceiver · ServerStats · WebServerSync · DNSChecker · CertificateReader · Clock · WebSettingsEditor · NginxTranslator · AlertSettings |
 
 ---
 

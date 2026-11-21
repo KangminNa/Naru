@@ -59,6 +59,8 @@ Paste an nginx config and it is turned into those fields. Applying checks agains
 - Every 30 seconds Naru checks services, the web server and Docker, and alerts **only on changes** — Discord, Slack or a generic signed webhook. Two bad checks in a row before something counts as down.
 - **"Needs attention"** at the top of the home screen — apps that stopped, apps listening on a different port (with a [switch port] button), DNS not pointing here, certificates ending soon, webhooks that never arrived.
 - **Logs tab** — app output and incoming requests on one screen, in time order. CPU and memory per service.
+- **Other containers on this server** — the home screen lists what Naru didn't start, grouped by compose project (view only — Naru never stops or removes them), with a button to give one an address.
+- **Join other networks** — a repository or image service can also join another compose network, to reach a database that lives there.
 
 **First run · admin**
 

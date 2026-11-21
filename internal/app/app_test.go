@@ -60,6 +60,13 @@ type fakeDocker struct {
 	listens map[string]model.Port // 컨테이너마다 앱이 실제로 듣는 포트 (없으면 어느 포트든 응답)
 	nets    map[string][]model.DockerNetwork
 	joins   []string
+	specs   map[string]model.ContainerSpec // Naru가 띄운 것
+}
+
+func (d *fakeDocker) specOf(name string) model.ContainerSpec {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.specs[name]
 }
 
 // NetworksOf는 nets에 적힌 컨테이너만 안다. 웹서버(naru-caddy)는 처음에 앱 네트워크에만 있다.
@@ -91,7 +98,11 @@ func (d *fakeDocker) joined() []string {
 func (d *fakeDocker) Start(_ context.Context, s model.ContainerSpec) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.states[s.Name] = model.ContainerState{Name: s.Name, Running: true, State: "running", Status: "Up 1 second"}
+	d.states[s.Name] = model.ContainerState{Name: s.Name, Running: true, State: "running", Status: "Up 1 second", Service: s.Service}
+	if d.specs == nil {
+		d.specs = map[string]model.ContainerSpec{}
+	}
+	d.specs[s.Name] = s
 	return nil
 }
 
@@ -1357,6 +1368,102 @@ func TestTheEnvFileBoxForRepositories(t *testing.T) {
 	form.Set("env_file", "A=\x00")
 	if code, _, body := h.post("/services/1/settings", form); code != http.StatusBadRequest || !strings.Contains(body, "64KB") {
 		t.Fatalf("%d", code)
+	}
+}
+
+// ── 이 서버의 다른 컨테이너 · 앱을 다른 네트워크에도 ──────────────
+
+func TestHomeListsTheContainersNaruDidNotStart(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	if _, _, page := h.get("/"); strings.Contains(page, "이 서버의 다른 컨테이너") {
+		t.Fatal("nothing else is running — no list")
+	}
+	user := func(n string) model.DockerNetwork { return model.DockerNetwork{Name: n, UserDefined: true} }
+	h.docker.set("cairn-web-1", model.ContainerState{Name: "cairn-web-1", Running: true, State: "running", Status: "Up 3 days", Ports: []model.Port{3000},
+		Project: "cairn", Networks: []model.DockerNetwork{user("cairn_default")}})
+	h.docker.set("cairn-db-1", model.ContainerState{Name: "cairn-db-1", Running: true, State: "running", Status: "Up 4 days", Ports: []model.Port{5432},
+		Project: "cairn", Networks: []model.DockerNetwork{user("cairn_default")}})
+	h.docker.set("couchdb", model.ContainerState{Name: "couchdb", Running: true, State: "running", Status: "Up 2 weeks", Ports: []model.Port{5984},
+		Networks: []model.DockerNetwork{{Name: "bridge"}}})
+	h.docker.set("old-api", model.ContainerState{Name: "old-api", State: "exited", Status: "Exited (0) 5 days ago"})
+	h.docker.set("naru-caddy", model.ContainerState{Name: "naru-caddy", Running: true, State: "running"})
+
+	// Naru가 띄운 것은 목록에 없다
+	h.post("/services/new", url.Values{"kind": {"image"}, "source": {"me/app"}})
+	h.app.wait()
+
+	_, _, page := h.get("/")
+	for _, want := range []string{"이 서버의 다른 컨테이너", "<b>cairn</b> · compose 묶음", "따로 띄운 것", "cairn-web-1", "포트 3000 · Up 3 days · cairn_default",
+		`href="/services/new?kind=external&amp;upstream=cairn-web-1%3a3000"`, `href="/services/new?kind=external&amp;upstream=cairn-db-1%3a5432"`,
+		"기본 bridge에만 있어요", "Exited (0) 5 days ago", "끄거나 지우지 않아요"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the home page is missing %q", want)
+		}
+	}
+	others := page[strings.Index(page, `class="others"`):]
+	if strings.Contains(others, "naru-app-1") || strings.Contains(others, "naru-caddy") || strings.Contains(others, "upstream=old-api") {
+		t.Fatal("Naru's own containers are not listed, and a stopped one gets no button")
+	}
+	if strings.Contains(others, "<form") || strings.Contains(others, "delete") || strings.Contains(others, "stop") {
+		t.Fatal("the list is view only")
+	}
+
+	// [주소 붙이기]는 외부 연결 화면을 채워서 연다
+	_, _, form := h.get("/services/new?kind=external&upstream=cairn-web-1:3000")
+	if !strings.Contains(form, `name="upstream" value="cairn-web-1:3000"`) {
+		t.Fatal("the upstream field is filled in")
+	}
+	if _, _, form := h.get("/services/new?kind=external&upstream=" + url.QueryEscape(`"><script>`)); strings.Contains(form, "<script>") && !strings.Contains(form, `name="upstream" value=""`) {
+		t.Fatal("only a well-formed address is filled in")
+	}
+	// 붙이고 나면 버튼 대신 어느 서비스가 보내는지
+	h.post("/services/new", url.Values{"kind": {"external"}, "upstream": {"cairn-web-1:3000"}, "name": {"cairn"}})
+	_, _, page = h.get("/")
+	if !strings.Contains(page, "cairn 서비스가 여기로 보내요") || strings.Contains(page, "upstream=cairn-web-1%3a3000") {
+		t.Fatal("a linked container shows its service instead of the button")
+	}
+}
+
+func TestAServiceCanJoinOtherNetworks(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	h.docker.set("cairn-db-1", model.ContainerState{Name: "cairn-db-1", Running: true, State: "running", Ports: []model.Port{5432},
+		Project: "cairn", Networks: []model.DockerNetwork{{Name: "cairn_default", UserDefined: true}}})
+
+	// 칸은 저장소·이미지에만 있고, 이 서버의 네트워크를 제안한다
+	_, _, page := h.get("/services/new?kind=image")
+	if !strings.Contains(page, `name="networks"`) || !strings.Contains(page, `<option value="cairn_default">`) {
+		t.Fatal("the networks field suggests networks other containers are on")
+	}
+	for _, kind := range []string{"static", "external"} {
+		if _, _, page := h.get("/services/new?kind=" + kind); strings.Contains(page, `name="networks"`) {
+			t.Fatalf("%s runs no container — no networks field", kind)
+		}
+	}
+	if code, _, body := h.post("/services/new", url.Values{"kind": {"image"}, "source": {"me/app"}, "networks": {"host"}}); code != http.StatusBadRequest || !strings.Contains(body, "bridge·host·none") {
+		t.Fatalf("%d — the default networks are refused", code)
+	}
+
+	h.post("/services/new", url.Values{"kind": {"image"}, "source": {"me/app"}, "networks": {"cairn_default"}})
+	h.app.wait()
+	if spec := h.docker.specOf("naru-app-1"); strings.Join(spec.ExtraNetworks, " ") != "cairn_default" {
+		t.Fatalf("the first container already joins it: %+v", spec)
+	}
+	_, _, page = h.get("/services/1")
+	if !strings.Contains(page, `name="networks" value="cairn_default"`) {
+		t.Fatal("the settings show it")
+	}
+	form := url.Values{"source": {"me/app"}, "networks": {"cairn_default"}}
+	if _, loc, _ := h.post("/services/1/settings", form); strings.Contains(loc, "redeploy") {
+		t.Fatalf("unchanged means no redeploy: %q", loc)
+	}
+	form.Set("networks", "cairn_default, db-net")
+	if _, loc, _ := h.post("/services/1/settings", form); !strings.Contains(loc, "ok=redeploy") {
+		t.Fatalf("changed networks need a redeploy: %q", loc)
+	}
+	if s := h.service(1); s.Networks != "cairn_default db-net" {
+		t.Fatalf("%q", s.Networks)
 	}
 }
 

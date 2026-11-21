@@ -382,7 +382,12 @@ type ServiceViewer interface {
 	Detail(ctx context.Context, id model.ServiceID) (model.ServiceView, error)
 	Deployment(ctx context.Context, id model.ServiceID, d model.DeploymentID) (model.DeploymentView, error)
 	Logs(ctx context.Context, id model.ServiceID, f model.LogFilter) (model.LogsView, error) // 앱 출력과 요청을 시간순으로
-	ContainerChoices(ctx context.Context) ([]string, error)                                  // 외부 연결 칸에 제안할 이 서버의 다른 컨테이너 ("이름:포트")
+}
+
+// ContainerFinder는 Naru가 띄우지 않은, 이 서버의 다른 컨테이너를 찾는다. 보기만 한다 — 끄거나 지우지 않는다.
+type ContainerFinder interface {
+	Others(ctx context.Context) ([]model.OtherContainer, error) // compose 묶음별·이름순. Docker를 읽지 못하면 비어 있다
+	Choices(ctx context.Context) ([]string, error)              // 외부 연결 칸에 제안할 돌고 있는 것 ("이름:포트")
 }
 
 // ServerStats는 서버의 CPU·메모리·디스크를 알려준다.

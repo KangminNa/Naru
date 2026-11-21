@@ -365,12 +365,15 @@ func (a *App) assemble() error {
 	viewer := views.NewServiceViewer(views.Parts{
 		Services: serviceStore, Secrets: secrets, History: history, Containers: out.Watcher, Kinds: lookup,
 		Admin: adminDomain, Deployer: deployer, Certs: out.Certs, Clock: out.Clock, HTTPSPort: cfg.HTTPSPort, Web: webStore,
-		AppLogs: out.AppLogs, Access: out.Access, Watch: watcher, Hide: []string{cfg.CaddyContainer, selfHost(cfg.SelfUpstream)},
+		AppLogs: out.AppLogs, Access: out.Access, Watch: watcher,
+	}, a.log)
+	finder := views.NewContainerFinder(views.FinderParts{
+		Services: serviceStore, Containers: out.Watcher, Hide: []string{cfg.CaddyContainer, selfHost(cfg.SelfUpstream)},
 	}, a.log)
 
 	srv, err := web.New(web.Deps{
 		Login: login, Accounts: a.Accounts, SetupKey: a.key, AdminDomain: adminDomain, CertEmail: certEmail, Setup: setup,
-		Launcher: launcher, Editor: editor, Viewer: viewer, Deployer: deployer, Control: control, Hooks: hooks,
+		Launcher: launcher, Editor: editor, Viewer: viewer, Finder: finder, Deployer: deployer, Control: control, Hooks: hooks,
 		Stats: out.Stats, WebServer: sync, DNS: out.DNS, Certs: out.Certs, Clock: out.Clock, Log: a.log,
 		WebSettings: webSettings, Nginx: websettings.NginxReader{}, Alerts: alertSettings, DataDir: cfg.DataDir, Version: cfg.Version,
 	})

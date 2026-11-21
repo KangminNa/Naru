@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -522,3 +523,33 @@ func (f EnvFile) Bytes() []byte { return []byte(f.text) }
 
 // Lines는 줄 수다 — 배포 기록에는 내용 대신 이것만 남긴다.
 func (f EnvFile) Lines() int { return strings.Count(f.text, "\n") }
+
+// NetworkNames는 앱 컨테이너를 앱 네트워크 말고 더 붙일 Docker 네트워크 이름들이다.
+// 다른 compose 묶음의 DB 같은 컨테이너에 앱이 닿게 한다. 저장은 빈칸 하나로 이은 글.
+type NetworkNames struct{ text string }
+
+var networkNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
+const networkNamesMax = 8
+
+// ParseNetworkNames는 띄어 쓰거나 쉼표·줄로 나눈 이름들을 받는다. 같은 이름은 한 번만.
+// 기본 네트워크(bridge·host·none)는 받지 않는다 — 이름 풀이가 안 되거나(bridge) 격리를 없앤다(host).
+func ParseNetworkNames(text string) (NetworkNames, error) {
+	bad := InputError{Field: "networks", Code: "network"}
+	var names []string
+	for _, n := range strings.FieldsFunc(text, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r' }) {
+		if !networkNamePattern.MatchString(n) || n == "bridge" || n == "host" || n == "none" {
+			return NetworkNames{}, bad
+		}
+		if !slices.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
+	if len(names) > networkNamesMax {
+		return NetworkNames{}, bad
+	}
+	return NetworkNames{strings.Join(names, " ")}, nil
+}
+
+func (n NetworkNames) String() string { return n.text }
+func (n NetworkNames) IsZero() bool   { return n.text == "" }

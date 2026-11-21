@@ -294,3 +294,19 @@ func TestEnvFileKeepsWhatWasWritten(t *testing.T) {
 		t.Fatal("stored text is read as is")
 	}
 }
+
+func TestNetworkNames(t *testing.T) {
+	n, err := ParseNetworkNames(" cairn_default, monitor.net\ncairn_default  db-net ")
+	if err != nil || n.String() != "cairn_default monitor.net db-net" {
+		t.Fatalf("spaces, commas and lines separate; each name once: %q %v", n.String(), err)
+	}
+	if n, err := ParseNetworkNames("  "); err != nil || !n.IsZero() {
+		t.Fatalf("blank means none: %q %v", n.String(), err)
+	}
+	for _, bad := range []string{"bridge", "ok host", "none", "-x", "a/b", "a;rm", strings.Repeat("n", 129), "a b c d e f g h i"} {
+		_, err := ParseNetworkNames(bad)
+		if ie, ok := AsInputError(err); !ok || ie.Field != "networks" || ie.Code != "network" {
+			t.Errorf("%.20q should be refused: %v", bad, err)
+		}
+	}
+}

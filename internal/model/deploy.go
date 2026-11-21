@@ -119,6 +119,8 @@ type ContainerSpec struct {
 	Aliases []string
 	Service ServiceID
 	Deploy  DeploymentID
+
+	ExtraNetworks []string // 앱 네트워크 말고 더 붙일 네트워크 — 같은 별칭으로, 띄우기 전에 붙인다
 }
 
 // ContainerState는 컨테이너 하나의 상태다.
@@ -129,6 +131,12 @@ type ContainerState struct {
 	Status   string // "Up 3 hours"
 	ExitCode int
 	Ports    []Port // 이미지가 연 포트 (EXPOSE) — 진단이 앱 포트 대신 응답하는 포트를 찾을 때
+
+	// 아래는 All이 채운다 (One은 채우지 않는다) — 다른 컨테이너 목록이 쓴다.
+	Image    string
+	Project  string          // compose 묶음 이름 (com.docker.compose.project) — 없으면 빈 값
+	Networks []DockerNetwork // 붙은 네트워크 (이름순)
+	Service  ServiceID       // Naru가 띄운 것이면 그 서비스 (naru.service 라벨) — 아니면 0
 }
 
 // ContainerStates는 이름 → 상태. nil이면 Docker를 읽지 못했다.

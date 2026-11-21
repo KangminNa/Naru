@@ -228,6 +228,19 @@ func (c *Client) ensureNetwork(ctx context.Context, name string) error {
 	return c.call(ctx, http.MethodPost, "/networks/create", map[string]any{"Name": name, "CheckDuplicate": true}, nil)
 }
 
+// connect는 컨테이너를 네트워크에 붙인다 (aliases는 그 네트워크에서의 별칭). 이미 붙어 있으면 그대로 괜찮다.
+func (c *Client) connect(ctx context.Context, network, name string, aliases []string) error {
+	body := map[string]any{"Container": name}
+	if len(aliases) > 0 {
+		body["EndpointConfig"] = map[string]any{"Aliases": aliases}
+	}
+	err := c.call(ctx, http.MethodPost, "/networks/"+url.PathEscape(network)+"/connect", body, nil)
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		return nil
+	}
+	return err
+}
+
 // networksOf는 컨테이너가 붙은 네트워크 이름들이다 (이름순).
 func (c *Client) networksOf(ctx context.Context, name string) ([]string, error) {
 	var raw struct {

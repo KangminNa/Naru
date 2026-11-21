@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +18,25 @@ type newServiceScreen struct {
 	Kinds      []string
 	Form       serviceForm
 	Containers []string // 외부 연결 칸 자동완성 — 이 서버의 다른 컨테이너
+	Networks   []string // "다른 네트워크" 칸 자동완성 — 다른 컨테이너들이 붙어 있는 네트워크
+}
+
+// suggestions는 폼의 자동완성이다 — 돌고 있는 다른 컨테이너("이름:포트")와 그것들이 붙은 네트워크. 못 읽으면 제안만 없다.
+func (s *Server) suggestions(r *http.Request) (containers, networks []string) {
+	others, _ := s.d.Finder.Others(r.Context())
+	for _, c := range others {
+		if c.Running {
+			containers = append(containers, c.Upstream())
+		}
+		for _, n := range c.Networks {
+			if !slices.Contains(networks, n) {
+				networks = append(networks, n)
+			}
+		}
+	}
+	slices.Sort(containers)
+	slices.Sort(networks)
+	return containers, networks
 }
 
 func kindNames() []string {
@@ -36,8 +56,14 @@ func (s *Server) newServicePage(w http.ResponseWriter, r *http.Request) {
 	if k, err := model.ParseKindName(r.URL.Query().Get("kind")); err == nil {
 		f.Kind = string(k)
 	}
-	choices, _ := s.d.Viewer.ContainerChoices(r.Context()) // 못 읽으면 제안만 없다
-	s.render(w, r, http.StatusOK, "new_service", view{Nav: "home", User: &u, Data: newServiceScreen{Kinds: kindNames(), Form: f, Containers: choices}})
+	// 홈의 [주소 붙이기]가 연결 대상을 채워서 연다 — 모양이 맞는 것만 받는다
+	if up := strings.TrimSpace(r.URL.Query().Get("upstream")); up != "" && len(up) <= 200 {
+		if _, err := model.ParseExternalAddress(up); err == nil || strings.HasSuffix(up, ":") {
+			f.Upstream = up
+		}
+	}
+	choices, networks := s.suggestions(r)
+	s.render(w, r, http.StatusOK, "new_service", view{Nav: "home", User: &u, Data: newServiceScreen{Kinds: kindNames(), Form: f, Containers: choices, Networks: networks}})
 }
 
 func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
@@ -48,9 +74,9 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 	f := readServiceForm(r)
 	fail := func(err error) {
 		f.Token = "" // 토큰은 다시 그리지 않는다
-		choices, _ := s.d.Viewer.ContainerChoices(r.Context())
+		choices, networks := s.suggestions(r)
 		s.render(w, r, http.StatusBadRequest, "new_service", view{Nav: "home", User: &u, Err: errKeyOf(err), ErrLine: errLineOf(err),
-			Data: newServiceScreen{Kinds: kindNames(), Form: f, Containers: choices}})
+			Data: newServiceScreen{Kinds: kindNames(), Form: f, Containers: choices, Networks: networks}})
 	}
 	kind, err := model.ParseKindName(f.Kind)
 	if err != nil {
@@ -344,6 +370,7 @@ type serviceScreen struct {
 	Form          string              // 오류가 난 폼
 	Findings      []finding           // 지켜보기가 찾은 이 서비스의 문제
 	Containers    []string            // 외부 연결 칸 자동완성 (외부 연결 서비스만)
+	Networks      []string            // "다른 네트워크" 칸 자동완성 (컨테이너 서비스만)
 	Usage         *model.ResourceUsage
 }
 
@@ -379,8 +406,8 @@ func (s *Server) serviceView(r *http.Request, u model.Account, sv model.ServiceV
 		WebhookURL: sv.Webhook.URL, WebhookSecret: sv.Webhook.Secret, HasToken: sv.Form.HasToken,
 		Domains: s.domainRows(r, sv.Domains), Web: webFormOf(sv.Web), Usage: sv.Usage,
 	}
-	if sv.Service.External != "" {
-		d.Containers, _ = s.d.Viewer.ContainerChoices(r.Context())
+	if sv.Service.External != "" || sv.Container {
+		d.Containers, d.Networks = s.suggestions(r)
 	}
 	for _, f := range sv.Findings {
 		row := findingOf(f)

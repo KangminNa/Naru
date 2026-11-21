@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,7 +18,9 @@ import (
 const (
 	labelService    = "naru.service"
 	labelDeployment = "naru.deployment"
-	stopGrace       = 10 * time.Second
+
+	labelComposeProject = "com.docker.compose.project" // docker compose가 붙인다
+	stopGrace           = 10 * time.Second
 )
 
 // Puller는 이미지를 받고 그 ID·열어둔 포트를 알려준다.
@@ -74,8 +77,27 @@ func (k Containers) Start(ctx context.Context, s model.ContainerSpec) error {
 			return err
 		}
 	}
+	// 더 붙일 네트워크는 만들지 않는다 — 남의 것이다. 없으면 여기서 말한다:
+	// Docker는 아직 띄우지 않은 컨테이너를 없는 네트워크에 붙여도 받아 두고 start에서야 실패한다 (dockerd 27에서 확인).
+	for _, n := range s.ExtraNetworks {
+		if err := k.c.call(ctx, http.MethodGet, "/networks/"+url.PathEscape(n), nil, nil); errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("네트워크 %q가 이 서버에 없어요 — 서비스 설정의 \"다른 네트워크\"를 확인하세요 / network %q does not exist on this server", n, n)
+		} else if err != nil {
+			return err
+		}
+	}
 	if _, err := k.c.create(ctx, spec); err != nil {
 		return err
+	}
+	// 다른 네트워크에는 띄우기 전에 붙인다 — 앱이 시작하면서 바로 그 네트워크의 DB를 찾을 수 있게.
+	for _, n := range s.ExtraNetworks {
+		if n == s.Network {
+			continue
+		}
+		if err := k.c.connect(ctx, n, s.Name, s.Aliases); err != nil {
+			k.c.remove(context.Background(), s.Name)
+			return fmt.Errorf("네트워크 %q에 붙이지 못했어요 — 서비스 설정의 \"다른 네트워크\"를 확인하세요 / cannot join network %q: %w", n, n, err)
+		}
 	}
 	if err := k.c.start(ctx, s.Name); err != nil {
 		k.c.remove(context.Background(), s.Name)
@@ -109,7 +131,12 @@ func (k Containers) All(ctx context.Context) (model.ContainerStates, error) {
 		for _, p := range c.Ports {
 			ports = append(ports, model.Port(p))
 		}
-		out[name] = model.ContainerState{Name: name, Running: c.State == Running, State: string(c.State), Status: c.Status, Ports: ports}
+		st := model.ContainerState{Name: name, Running: c.State == Running, State: string(c.State), Status: c.Status, Ports: ports,
+			Image: c.Image, Project: c.Labels[labelComposeProject], Networks: networksNamed(c.Networks)}
+		if id, err := strconv.ParseInt(c.Labels[labelService], 10, 64); err == nil {
+			st.Service = model.ServiceID(id)
+		}
+		out[name] = st
 	}
 	return out, nil
 }
@@ -140,20 +167,21 @@ func (k Containers) NetworksOf(ctx context.Context, name string) ([]model.Docker
 	if err != nil {
 		return nil, err
 	}
+	return networksNamed(names), nil
+}
+
+// networksNamed는 네트워크 이름에 "사용자 정의인가"를 붙인다 — 기본 네트워크(bridge·host·none)에서는 이름 풀이가 안 된다.
+func networksNamed(names []string) []model.DockerNetwork {
 	out := make([]model.DockerNetwork, 0, len(names))
 	for _, n := range names {
 		out = append(out, model.DockerNetwork{Name: n, UserDefined: n != "bridge" && n != "host" && n != "none"})
 	}
-	return out, nil
+	return out
 }
 
 // Join은 컨테이너를 네트워크에 붙인다. 이미 붙어 있으면 그대로 괜찮다.
 func (k Containers) Join(ctx context.Context, network, name string) error {
-	err := k.c.call(ctx, http.MethodPost, "/networks/"+url.PathEscape(network)+"/connect", map[string]string{"Container": name}, nil)
-	if err != nil && strings.Contains(err.Error(), "already exists") {
-		return nil
-	}
-	return err
+	return k.c.connect(ctx, network, name, nil)
 }
 
 // Leave는 컨테이너를 네트워크에서 뗀다. 이미 떨어져 있으면 그대로 괜찮다.

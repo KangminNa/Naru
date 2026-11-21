@@ -145,6 +145,7 @@ func (w ContainerSwapper) Swap(ctx context.Context, req model.SwapRequest, v mod
 	err = w.t.Starter.Start(ctx, model.ContainerSpec{
 		Name: name, Image: v.Image, Env: secrets.Env.List(), Binds: secrets.Volumes.List(),
 		Network: w.t.Network, Aliases: []string{alias}, Service: s.ID, Deploy: req.Deployment,
+		ExtraNetworks: strings.Fields(s.Networks),
 	})
 	if err != nil {
 		return model.LiveState{}, err

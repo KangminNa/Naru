@@ -48,7 +48,7 @@ Paste an nginx config and it is turned into those fields. Applying checks agains
 
 **Deploys**
 
-- **Builds like your machine** — BuildKit, the same builder as your local `docker build` (`RUN --mount=type=cache` and friends just work).
+- **Builds like your machine** — BuildKit, the same builder as your local `docker build` (`RUN --mount=type=cache` and friends just work). Base images (`FROM nginx:alpine` etc.) are checked on every deploy, so redeploying picks up their security fixes.
 - **Push to deploy** — a webhook URL and secret per service. GitHub HMAC · GitLab token · `?secret=` (registries). Only the configured branch.
 - **No downtime** — the new container starts, and only when it answers does the web server switch to it and the old one go away. If the new one dies, the old one stays.
 - Pushes that arrive during a deploy are merged into one deploy afterwards. Deploy steps and the full log stream live on the screen.

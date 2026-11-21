@@ -9,7 +9,7 @@ name: naru-rehearsal
 
 services:
   caddy:
-    image: caddy:2.11.6
+    image: caddy:2.11.9
     container_name: naru-rehearsal-caddy
     restart: "no"
     command: caddy run --resume --config /etc/caddy/bootstrap.json

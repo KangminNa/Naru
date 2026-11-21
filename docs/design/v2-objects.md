@@ -242,7 +242,7 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | 정적 사이트 · 인증서 저장소 | `/srv/sites` · Caddy의 `/data` (공유 볼륨 — Naru는 읽기만) |
 | 관리 소켓 | Caddy와 Naru만 마운트하는 볼륨의 `/run/caddy/admin.sock` |
 | Naru → 앱 컨테이너 (응답 확인·지켜보기·진단) | 컨테이너 이름 — Naru도 같은 네트워크에 있다 |
-| 이미지 빌드 | Naru 이미지 안의 buildx 실행 파일(`docker/buildx-bin`에서 버전 고정)이 Docker 소켓으로 데몬 내장 BuildKit을 쓴다. 빌드 묶음은 stdin tar — buildx는 그 묶음에 `.dockerignore`를 다시 적용하지 않는다(`scripts/buildx-check.sh`). 빌드 캐시는 데몬의 자동 정리에 맡기고 Naru는 지우지 않는다 |
+| 이미지 빌드 | Naru 이미지 안의 buildx 실행 파일(`docker/buildx-bin`에서 버전 고정)이 Docker 소켓으로 데몬 내장 BuildKit을 쓴다. 빌드 묶음은 stdin tar — buildx는 그 묶음에 `.dockerignore`를 다시 적용하지 않는다(`scripts/buildx-check.sh`). 기반 이미지는 배포마다 레지스트리에서 확인한다(`--pull`) — 움직이는 태그의 보안 수정이 다시 배포하면 들어온다. 빌드 캐시는 데몬의 자동 정리에 맡기고 Naru는 지우지 않는다 |
 
 > 설치형(systemd)도 있었으나 2026-10-14 지웠다 — Docker 밖 프로세스 관리를 위해 들였지만 그 기능이 없었고, 컨테이너 IP를 따라가느라 IP가 바뀌면 최대 30초 끊겼다.
 > 필요해지면 M5.5 커밋(`0c68166`)에서 되살린다.

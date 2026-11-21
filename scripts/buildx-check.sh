@@ -29,7 +29,7 @@ build() {
   (cd "$work/$1" && COPYFILE_DISABLE=1 tar --format ustar -cf - .) |
     docker run --rm -i --tmpfs /tmp -v /var/run/docker.sock:/var/run/docker.sock -v "$work/out:/out" \
       -e DOCKER_HOST=unix:///var/run/docker.sock -e DOCKER_CONFIG=/cfg --entrypoint /buildx "$tool" \
-      build --progress=plain --provenance=false --sbom=false --iidfile "/out/$1.iid" -t "naru-buildx-check:$1" - >"$work/$1.log" 2>&1
+      build --progress=plain --provenance=false --sbom=false --pull --iidfile "/out/$1.iid" -t "naru-buildx-check:$1" - >"$work/$1.log" 2>&1
 }
 
 check() {

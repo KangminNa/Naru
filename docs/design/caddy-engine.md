@@ -52,7 +52,7 @@ Naru는 Caddy를 화면 뒤의 엔진으로 쓴다. Caddy 설정은 Naru가 사�
 
 ## 부록 — 실제 Caddy로 확인한 것
 
-Caddy v2.11.6.
+Caddy v2.11.6 (운영은 2026-11-21부터 2.11.9 — 골든 파일은 `scripts/caddy-validate.sh`가 운영 버전으로 다시 확인한다).
 
 | 확인한 것 | 결과 |
 |---|---|

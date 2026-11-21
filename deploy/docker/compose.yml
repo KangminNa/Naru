@@ -8,7 +8,7 @@ name: naru
 services:
   # 웹서버 엔진. 설정은 Naru가 관리 소켓으로 통째로 밀어넣는다 — 이 컨테이너에 설정 파일을 두지 않는다.
   caddy:
-    image: caddy:2.11.6
+    image: caddy:2.11.9
     container_name: naru-caddy                      # shelf- 로 시작하면 안 된다 (v1이 앱으로 오해한다)
     restart: unless-stopped
     command: caddy run --resume --config /etc/caddy/bootstrap.json

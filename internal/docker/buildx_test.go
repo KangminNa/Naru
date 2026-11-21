@@ -47,7 +47,7 @@ func TestBuildxBuildsFromTheTarOnStdin(t *testing.T) {
 		t.Fatalf("%q %v\n%s", id, err, log.String())
 	}
 	if args := strings.Fields(read(t, rec+"/args")); strings.Join(args, " ") !=
-		"build --progress=plain --provenance=false --sbom=false --iidfile "+args[5]+" --tag naru-blog:7 -" {
+		"build --progress=plain --provenance=false --sbom=false --pull --iidfile "+args[6]+" --tag naru-blog:7 -" {
 		t.Fatalf("args: %v", args)
 	}
 	if read(t, rec+"/stdin") != "TARBALL" || !strings.Contains(log.String(), "#1 [1/2] FROM busybox") {

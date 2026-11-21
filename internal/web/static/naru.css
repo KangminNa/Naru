@@ -309,4 +309,15 @@ details.reveal code { display: block; margin-top: 6px; overflow-wrap: anywhere; 
 .other.off .other-text b { color: var(--text-2); }
 .other.off .other-text span { color: var(--text-3); }
 .others-note { margin: 8px 2px 0; font-size: 12.5px; color: var(--text-3); }
+.other-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* 저장소로 옮기기 — 가져올 환경 변수 고르기, 주소 옮기기 */
+fieldset.pick { border: 0; margin: 0; padding: 0; min-width: 0; }
+fieldset.pick legend { padding: 0; font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.pick-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 6px 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
+.pick-list .check-label { overflow-wrap: anywhere; }
+.pick-list .check-label.muted { color: var(--text-3); }
+.takeover { display: grid; gap: 6px; padding: 14px 16px; border-radius: 14px; background: var(--soft); }
+.takeover .check-label { color: var(--text); align-items: flex-start; }
+.takeover small { color: var(--text-3); font-size: 13px; }
 

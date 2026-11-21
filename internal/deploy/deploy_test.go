@@ -189,10 +189,14 @@ type fakeSync struct {
 	docker *fakeDocker
 	fail   error
 	seen   [][]string
+	on     func() // 맞출 때마다 부른다 — 그 순간의 상태를 볼 때
 }
 
 func (s *fakeSync) SyncNow(context.Context) error {
 	s.seen = append(s.seen, s.docker.names())
+	if s.on != nil {
+		s.on()
+	}
 	return s.fail
 }
 func (s *fakeSync) Status() model.WebServerStatus { return model.WebServerStatus{} }
@@ -257,6 +261,7 @@ func newRig(t *testing.T) *rig {
 	r.d, r.wait = NewDeployer(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), Parts{
 		Lock: lock, History: r.history, Past: r.history, Logs: NewDeployLog(r.history), Services: r.services,
 		Live: store.NewLiveStates(db), Kinds: lookup, Cleaner: NewOldVersionCleaner(r.history, r.docker, siteFiles), Events: bus, Sync: r.sync,
+		Mover: store.NewDomainMoves(db),
 	})
 	r.control = NewServiceControl(ControlParts{
 		Services: r.services, Store: r.services, Live: store.NewLiveStates(db), Lock: lock, Switch: r.docker, Remover: r.docker,
@@ -622,6 +627,41 @@ func TestTheNewContainerAlsoJoinsTheOtherNetworks(t *testing.T) {
 	r.docker.mu.Unlock()
 	if strings.Join(spec.ExtraNetworks, " ") != "cairn_default db-net" || spec.Network != "naru-net" {
 		t.Fatalf("%+v", spec)
+	}
+}
+
+// 넘겨받기: 새 것이 응답한 뒤에만 옛 서비스의 주소를 옮긴다. 실패한 배포는 아무것도 옮기지 않는다.
+func TestAddressesMoveOnlyAfterTheNewServiceAnswers(t *testing.T) {
+	r := newRig(t)
+	r.docker.images["me/app"] = model.ImageDetails{ID: "sha256:v", Ports: []model.Port{80}}
+	old := r.create(model.NewService{Name: name("cairn"), Kind: model.KindExternal, External: "cairn-web-1:3000"}, "")
+	dn, _ := model.ParseDomainName("cairn.example.com")
+	store.NewDomains(r.db).Add(ctx, old, model.DomainInput{Domain: dn, HTTPS: true})
+	id := r.create(model.NewService{Name: name("app"), Kind: model.KindImage, Source: "me/app", TakesOver: old}, "")
+
+	r.docker.listens = func(string) bool { return false } // 새 것이 응답하지 않는다
+	if dep := r.deploy(id); dep.Status != model.DeployFailed {
+		t.Fatalf("%s", dep.Log)
+	}
+	if len(r.get(old).Domains) != 1 || len(r.get(id).Domains) != 0 || r.get(id).TakesOver != old {
+		t.Fatal("a failed deploy moves nothing and keeps the mark for the next try")
+	}
+
+	r.docker.listens = nil
+	movedBeforeSync := false
+	r.sync.on = func() { movedBeforeSync = len(r.get(id).Domains) == 1 }
+	dep := r.deploy(id)
+	if dep.Status != model.DeploySuccess || !strings.Contains(dep.Log, "주소 1개와 웹서버 설정을 이 서비스로 옮겼어요") {
+		t.Fatalf("%s", dep.Log)
+	}
+	if len(r.get(old).Domains) != 0 || len(r.get(id).Domains) != 1 || r.get(id).TakesOver != 0 {
+		t.Fatalf("old=%v new=%v", r.get(old).Domains, r.get(id).Domains)
+	}
+	if !movedBeforeSync {
+		t.Fatal("the web server is synced after the move, so one sync sends the address to the new service")
+	}
+	if dep := r.deploy(id); strings.Contains(dep.Log, "옮겼어요") {
+		t.Fatal("it moves once")
 	}
 }
 

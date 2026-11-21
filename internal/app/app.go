@@ -168,9 +168,10 @@ type Outside struct {
 	Snippet  contract.SnippetCompiler // 고급 칸의 Caddyfile을 바꿔 준다 (Caddy 관리 소켓)
 	Alerts   contract.AlertSender     // 알림을 보낸다 (HTTP)
 	AppLogs  contract.ContainerLogReader
-	Access   contract.AccessLogReader // 비면 데이터 폴더의 웹서버 접근 로그를 읽는다
-	Usage    contract.UsageReader     // 컨테이너 CPU·메모리 (Docker stats)
-	Networks contract.NetworkJoiner   // 웹서버 컨테이너를 다른 네트워크에 붙이고 뗀다
+	Access   contract.AccessLogReader    // 비면 데이터 폴더의 웹서버 접근 로그를 읽는다
+	Usage    contract.UsageReader        // 컨테이너 CPU·메모리 (Docker stats)
+	Networks contract.NetworkJoiner      // 웹서버 컨테이너를 다른 네트워크에 붙이고 뗀다
+	Inspect  contract.ContainerInspector // 넘겨받을 컨테이너의 환경 변수·볼륨
 
 	WatchEvery time.Duration // 지켜보는 간격 (0이면 30초)
 	Clock      contract.Clock
@@ -187,7 +188,7 @@ func RealOutside(cfg Config) Outside {
 	return Outside{
 		Builder: docker.NewBuildxBuilder(cfg.Buildx, cfg.DockerSocket, filepath.Join(cfg.DataDir, "work", ".buildx")),
 		Puller:  docker.NewPuller(d), Images: docker.NewImages(d),
-		Starter: containers, Remover: containers, Switch: containers, Watcher: containers, AppLogs: containers, Usage: containers, Networks: containers,
+		Starter: containers, Remover: containers, Switch: containers, Watcher: containers, AppLogs: containers, Usage: containers, Networks: containers, Inspect: containers,
 		Code: git.Downloader{}, Ports: netcheck.TCP{}, DNS: netcheck.NewDNS(nil),
 		Stats:   stats.NewProcSampler(cfg.ProcDir, cfg.DataDir),
 		Sender:  caddy.NewSocketSender(cfg.CaddySocket),
@@ -323,6 +324,7 @@ func (a *App) assemble() error {
 	deployer, wait := deploy.NewDeployer(a.ctx, a.log, deploy.Parts{
 		Lock: lock, History: history, Past: history, Logs: deploy.NewDeployLog(history), Services: serviceStore,
 		Live: liveStates, Kinds: lookup, Cleaner: deploy.NewOldVersionCleaner(history, out.Images, siteFiles), Events: bus, Sync: sync,
+		Mover: store.NewDomainMoves(db),
 	})
 	a.wait = wait
 	control := deploy.NewServiceControl(deploy.ControlParts{
@@ -333,7 +335,7 @@ func (a *App) assemble() error {
 	// C. 서비스
 	names := services.NewNameChooser(serviceStore)
 	checker := services.NewDomainChecker(domains, adminDomain)
-	editor := services.NewServiceEditor(serviceStore, serviceStore, domains, secrets, names, checker, lookup, out.Random, bus)
+	editor := services.NewServiceEditor(serviceStore, serviceStore, domains, secrets, names, checker, lookup, out.Random, bus, out.Inspect)
 	launcher := services.NewServiceLauncher(editor, lookup, deployer)
 
 	// F. 웹훅
@@ -368,7 +370,8 @@ func (a *App) assemble() error {
 		AppLogs: out.AppLogs, Access: out.Access, Watch: watcher,
 	}, a.log)
 	finder := views.NewContainerFinder(views.FinderParts{
-		Services: serviceStore, Containers: out.Watcher, Hide: []string{cfg.CaddyContainer, selfHost(cfg.SelfUpstream)},
+		Services: serviceStore, Containers: out.Watcher, Inspector: out.Inspect, Hide: []string{cfg.CaddyContainer, selfHost(cfg.SelfUpstream)},
+		AppNetwork: cfg.Network,
 	}, a.log)
 
 	srv, err := web.New(web.Deps{

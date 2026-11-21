@@ -292,6 +292,52 @@ func (c *Client) inspect(ctx context.Context, name string) (Inspection, error) {
 	return Inspection{Running: raw.State.Running, Status: raw.State.Status, ExitCode: raw.State.ExitCode}, nil
 }
 
+// Details는 컨테이너의 환경 변수·볼륨·출처 라벨이다. 이미지를 읽지 못하면 이미지가 정한 환경 변수만 비어 있다.
+type Details struct {
+	Env, ImageEnv       []string
+	Binds, NamedVolumes []string
+	Source              string
+}
+
+func (c *Client) details(ctx context.Context, name string) (Details, error) {
+	var raw struct {
+		Image  string // 이미지 ID
+		Config struct {
+			Env    []string
+			Labels map[string]string
+		}
+		Mounts []struct {
+			Type, Name, Source, Destination string
+			RW                              bool
+		}
+	}
+	if err := c.call(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/json", nil, &raw); err != nil {
+		return Details{}, err
+	}
+	d := Details{Env: raw.Config.Env, Source: raw.Config.Labels["org.opencontainers.image.source"]}
+	for _, m := range raw.Mounts {
+		switch m.Type {
+		case "bind":
+			b := m.Source + ":" + m.Destination
+			if !m.RW {
+				b += ":ro"
+			}
+			d.Binds = append(d.Binds, b)
+		case "volume":
+			d.NamedVolumes = append(d.NamedVolumes, m.Name+":"+m.Destination)
+		}
+	}
+	sort.Strings(d.Binds)
+	sort.Strings(d.NamedVolumes)
+	var img struct {
+		Config struct{ Env []string }
+	}
+	if raw.Image != "" && c.call(ctx, http.MethodGet, "/images/"+url.PathEscape(raw.Image)+"/json", nil, &img) == nil {
+		d.ImageEnv = img.Config.Env
+	}
+	return d, nil
+}
+
 // Logs는 컨테이너 출력의 마지막 n줄이다 (stdout·stderr 섞어서).
 func (c *Client) logs(ctx context.Context, name string, n int) (string, error) {
 	res, err := c.stream(ctx, http.MethodGet, fmt.Sprintf("/containers/%s/logs?stdout=1&stderr=1&tail=%d", url.PathEscape(name), n), nil, "")

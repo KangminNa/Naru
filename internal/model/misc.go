@@ -80,6 +80,36 @@ func (c OtherContainer) Upstream() string {
 	return c.Name + ":"
 }
 
+// ContainerSeed는 돌고 있는 컨테이너를 저장소 서비스로 옮길 때 화면에 미리 채울 값이다. 환경 변수 값은 없다.
+type ContainerSeed struct {
+	Name         string
+	Port         Port
+	Volumes      string    // "/서버경로:/컨테이너경로" 줄들 — 호스트 경로를 붙인 것만
+	NamedVolumes []string  // 옮기지 않는 것 — 이름 있는 볼륨 ("pgdata:/var/lib/data")
+	Networks     string    // 앱 네트워크 말고 붙어 있는 사용자 정의 네트워크 (빈칸으로 나눔)
+	Env          []SeedEnv // 이름만 (이름순)
+	Repo         string    // 이미지 라벨이 알려 준 저장소 주소 — 없으면 빈 값
+
+	Linked        ServiceID // 이 컨테이너로 보내는 외부 연결 서비스 (없으면 0) — 성공하면 이 서비스의 주소를 옮길 수 있다
+	LinkedName    string
+	LinkedDomains []string
+}
+
+// SeedEnv는 컨테이너의 환경 변수 이름 하나다.
+type SeedEnv struct {
+	Name      string
+	FromImage bool // 이미지가 정한 값 그대로 (PATH 같은 것) — 새 이미지도 스스로 정하므로 기본으로 가져오지 않는다
+}
+
+// ContainerDetails는 도구가 읽은 컨테이너 하나다. Env의 값은 비밀이다 — 화면 계층은 이 타입을 쓰지 않는다 (R10).
+type ContainerDetails struct {
+	Env          []string // "KEY=value"
+	ImageEnv     []string // 이미지가 정한 "KEY=value"
+	Binds        []string // 호스트 경로를 붙인 것 — "/서버경로:/컨테이너경로[:ro]"
+	NamedVolumes []string // "이름:/컨테이너경로"
+	Source       string   // 이미지 라벨 org.opencontainers.image.source
+}
+
 // HomeView는 홈 화면이다.
 type HomeView struct {
 	Cards      []ServiceCard

@@ -284,6 +284,38 @@ func TestUsage(t *testing.T) {
 }
 
 // 웹서버 컨테이너를 다른 네트워크에 붙이고 떼기 — 이미 붙어 있거나 이미 떨어져 있으면 그대로 괜찮다.
+func TestInspectReadsEnvVolumesAndSource(t *testing.T) {
+	sock := fakeDocker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/containers/cairn-web-1/json":
+			w.Write([]byte(`{"Image":"sha256:img1","Config":{"Env":["DATABASE_URL=postgres://u:p@db/app","PATH=/usr/bin","NODE_ENV=production"],
+				"Labels":{"org.opencontainers.image.source":"https://github.com/me/cairn"}},
+				"Mounts":[{"Type":"bind","Source":"/srv/uploads","Destination":"/app/uploads","RW":true},
+				          {"Type":"bind","Source":"/etc/localtime","Destination":"/etc/localtime","RW":false},
+				          {"Type":"volume","Name":"cairn_cache","Source":"/var/lib/docker/volumes/cairn_cache/_data","Destination":"/cache","RW":true}]}`))
+		case "/images/sha256:img1/json":
+			w.Write([]byte(`{"Config":{"Env":["PATH=/usr/bin","NODE_ENV=development"]}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"message":"No such container"}`))
+		}
+	}))
+	c := NewContainers(New(sock))
+	d, err := c.Inspect(context.Background(), "cairn-web-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Env) != 3 || strings.Join(d.ImageEnv, "|") != "PATH=/usr/bin|NODE_ENV=development" || d.Source != "https://github.com/me/cairn" {
+		t.Fatalf("%+v", d)
+	}
+	if strings.Join(d.Binds, "|") != "/etc/localtime:/etc/localtime:ro|/srv/uploads:/app/uploads" || strings.Join(d.NamedVolumes, "|") != "cairn_cache:/cache" {
+		t.Fatalf("host paths are binds, named volumes apart: %v %v", d.Binds, d.NamedVolumes)
+	}
+	if _, err := c.Inspect(context.Background(), "gone"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("a missing container is ErrNotFound: %v", err)
+	}
+}
+
 func TestNetworks(t *testing.T) {
 	var calls []string
 	sock := fakeDocker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

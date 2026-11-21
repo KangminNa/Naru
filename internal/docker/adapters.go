@@ -179,6 +179,18 @@ func networksNamed(names []string) []model.DockerNetwork {
 	return out
 }
 
+// Inspect는 컨테이너 하나의 환경 변수·볼륨·출처다 (ContainerInspector). 없는 컨테이너면 model.ErrNotFound.
+func (k Containers) Inspect(ctx context.Context, name string) (model.ContainerDetails, error) {
+	d, err := k.c.details(ctx, name)
+	if errors.Is(err, ErrNotFound) {
+		return model.ContainerDetails{}, model.ErrNotFound
+	}
+	if err != nil {
+		return model.ContainerDetails{}, err
+	}
+	return model.ContainerDetails{Env: d.Env, ImageEnv: d.ImageEnv, Binds: d.Binds, NamedVolumes: d.NamedVolumes, Source: d.Source}, nil
+}
+
 // Join은 컨테이너를 네트워크에 붙인다. 이미 붙어 있으면 그대로 괜찮다.
 func (k Containers) Join(ctx context.Context, network, name string) error {
 	return k.c.connect(ctx, network, name, nil)

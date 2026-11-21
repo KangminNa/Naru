@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -16,7 +17,9 @@ import (
 type FinderParts struct {
 	Services   contract.ServiceReader
 	Containers contract.ContainerWatcher
+	Inspector  contract.ContainerInspector
 	Hide       []string // 보여 주지 않을 컨테이너 (Naru 자신과 웹서버)
+	AppNetwork string   // 앱 네트워크 — Naru가 어차피 붙이므로 "다른 네트워크"로 채우지 않는다
 }
 
 // containerFinder는 Naru가 띄우지 않은 컨테이너를 찾는다. 읽기만 한다 — 남의 컨테이너를 끄거나 지우는 길이 없다.
@@ -100,6 +103,61 @@ func (f containerFinder) Choices(ctx context.Context) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// Seed는 그 컨테이너를 저장소 서비스로 옮길 때 화면에 채울 값이다. 환경 변수는 이름만 꺼낸다 — 값은 화면으로 가지 않는다.
+// Naru가 띄우지 않은 컨테이너만 된다. 없으면 model.ErrNotFound.
+func (f containerFinder) Seed(ctx context.Context, name string) (model.ContainerSeed, error) {
+	others, err := f.Others(ctx)
+	if err != nil {
+		return model.ContainerSeed{}, err
+	}
+	i := slices.IndexFunc(others, func(c model.OtherContainer) bool { return c.Name == name })
+	if i < 0 {
+		return model.ContainerSeed{}, model.ErrNotFound
+	}
+	c := others[i]
+	seed := model.ContainerSeed{Name: c.Name, Linked: c.Linked, LinkedName: c.LinkedName}
+	if len(c.Ports) > 0 {
+		seed.Port = c.Ports[0]
+	}
+	var nets []string
+	for _, n := range c.Networks {
+		if n != f.p.AppNetwork {
+			nets = append(nets, n)
+		}
+	}
+	seed.Networks = strings.Join(nets, " ")
+	if c.Linked != 0 {
+		if s, err := f.p.Services.Get(ctx, c.Linked); err == nil {
+			for _, d := range s.Domains {
+				seed.LinkedDomains = append(seed.LinkedDomains, d.Domain.String())
+			}
+		}
+	}
+	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	details, err := f.p.Inspector.Inspect(cctx, name)
+	if err != nil {
+		return model.ContainerSeed{}, err
+	}
+	var binds []string
+	for _, b := range details.Binds {
+		if _, err := model.ParseVolumes(b); err == nil {
+			binds = append(binds, b)
+		}
+	}
+	seed.Volumes, seed.NamedVolumes = strings.Join(binds, "\n"), details.NamedVolumes
+	if _, err := model.ParseRepoURL(details.Source); err == nil {
+		seed.Repo = details.Source
+	}
+	for _, l := range details.Env {
+		if k, _, ok := strings.Cut(l, "="); ok {
+			seed.Env = append(seed.Env, model.SeedEnv{Name: k, FromImage: slices.Contains(details.ImageEnv, l)})
+		}
+	}
+	sort.Slice(seed.Env, func(i, j int) bool { return seed.Env[i].Name < seed.Env[j].Name })
+	return seed, nil
 }
 
 // externalHost는 외부 연결 주소의 호스트다 ("https://name:3000" → "name"). 주소가 없거나 모양이 다르면 빈 값.

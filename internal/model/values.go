@@ -452,6 +452,28 @@ func (e EnvVars) List() []string {
 	return out
 }
 
+// EnvVarsFrom은 다른 컨테이너에서 읽은 "KEY=value" 줄들을 then 앞에 둔다 — 같은 이름이면 then(화면에 적은 것)이 이긴다.
+// 이름 모양이 아니거나 값이 여러 줄이면 받지 않는다 (InputError.Line에 몇 번째인지).
+func EnvVarsFrom(lines []string, then EnvVars) (EnvVars, error) {
+	if len(lines) == 0 {
+		return then, nil
+	}
+	for i, l := range lines {
+		k, _, ok := strings.Cut(l, "=")
+		if !ok || !envKeyPattern.MatchString(k) {
+			return EnvVars{}, InputError{Field: "env", Code: "env", Line: i + 1}
+		}
+		if strings.ContainsAny(l, "\n\r") {
+			return EnvVars{}, InputError{Field: "env", Code: "envmultiline", Line: i + 1}
+		}
+	}
+	text := strings.Join(lines, "\n")
+	if then.text != "" {
+		text += "\n" + then.text
+	}
+	return EnvVars{text}, nil
+}
+
 // Volumes는 "/서버경로:/컨테이너경로[:ro]" 줄들이다.
 type Volumes struct{ text string }
 

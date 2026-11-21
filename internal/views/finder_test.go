@@ -21,6 +21,15 @@ type someContainers struct {
 
 func (c someContainers) All(context.Context) (model.ContainerStates, error) { return c.all, c.err }
 
+type someDetails map[string]model.ContainerDetails
+
+func (d someDetails) Inspect(_ context.Context, name string) (model.ContainerDetails, error) {
+	if v, ok := d[name]; ok {
+		return v, nil
+	}
+	return model.ContainerDetails{}, model.ErrNotFound
+}
+
 func TestOtherContainersAreTheOnesNaruDidNotStart(t *testing.T) {
 	ctx := context.Background()
 	db, err := store.Open(filepath.Join(t.TempDir(), "naru.db"))
@@ -86,6 +95,38 @@ func TestOtherContainersAreTheOnesNaruDidNotStart(t *testing.T) {
 	choices, _ := f.Choices(ctx)
 	if got := strings.Join(choices, " "); got != "aaa: cairn-db-1:5432 cairn-web-1:3000 couchdb:5984" {
 		t.Fatalf("running ones only, by name: %s", got)
+	}
+
+	// 저장소로 옮길 때 채울 값 — 환경 변수는 이름만
+	dn, _ := model.ParseDomainName("cairn.example.com")
+	store.NewDomains(db).Add(ctx, cairn, model.DomainInput{Domain: dn, HTTPS: true})
+	details := someDetails{"cairn-web-1": {
+		Env:      []string{"PATH=/usr/bin", "DATABASE_URL=postgres://u:hunter2@cairn-db-1/app", "NODE_ENV=production"},
+		ImageEnv: []string{"PATH=/usr/bin", "NODE_ENV=development"},
+		Binds:    []string{"/srv/uploads:/app/uploads", "/etc/localtime:/etc/localtime:ro"}, NamedVolumes: []string{"cairn_cache:/cache"},
+		Source: "https://github.com/me/cairn",
+	}}
+	f = NewContainerFinder(FinderParts{Services: services, Containers: someContainers{all: all}, Inspector: details,
+		Hide: []string{"naru-caddy", "naru"}, AppNetwork: "shelf-net"}, quiet)
+	seed, err := f.Seed(ctx, "cairn-web-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seed.Port != 3000 || seed.Networks != "cairn_default" || seed.Repo != "https://github.com/me/cairn" ||
+		seed.Volumes != "/srv/uploads:/app/uploads\n/etc/localtime:/etc/localtime:ro" || strings.Join(seed.NamedVolumes, " ") != "cairn_cache:/cache" {
+		t.Fatalf("port, the other networks (not the app network), host-path volumes, the repo from the label: %+v", seed)
+	}
+	if seed.Linked != cairn || seed.LinkedName != "cairn" || strings.Join(seed.LinkedDomains, " ") != "cairn.example.com" {
+		t.Fatalf("the service that sends here, with its addresses: %+v", seed)
+	}
+	want := []model.SeedEnv{{Name: "DATABASE_URL"}, {Name: "NODE_ENV"}, {Name: "PATH", FromImage: true}}
+	if len(seed.Env) != 3 || seed.Env[0] != want[0] || seed.Env[1] != want[1] || seed.Env[2] != want[2] {
+		t.Fatalf("names only, by name; only an unchanged image value counts as the image's: %+v", seed.Env)
+	}
+	for _, name := range []string{"naru-blog-3", "naru-caddy", "nope"} {
+		if _, err := f.Seed(ctx, name); !errors.Is(err, model.ErrNotFound) {
+			t.Errorf("%s is not something to take over: %v", name, err)
+		}
 	}
 
 	down := NewContainerFinder(FinderParts{Services: services, Containers: someContainers{err: errors.New("docker is down")}}, quiet)

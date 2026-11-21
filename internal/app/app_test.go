@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -61,6 +62,18 @@ type fakeDocker struct {
 	nets    map[string][]model.DockerNetwork
 	joins   []string
 	specs   map[string]model.ContainerSpec // Naru가 띄운 것
+	details map[string]model.ContainerDetails
+}
+
+// Inspect는 details에 적힌 컨테이너만 안다 (ContainerInspector).
+func (d *fakeDocker) Inspect(_ context.Context, name string) (model.ContainerDetails, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	v, ok := d.details[name]
+	if !ok {
+		return model.ContainerDetails{}, model.ErrNotFound
+	}
+	return v, nil
 }
 
 func (d *fakeDocker) specOf(name string) model.ContainerSpec {
@@ -305,7 +318,7 @@ func newHarnessWith(t *testing.T, o harnessOpts) *harness {
 	cfg := Config{DataDir: t.TempDir(), Network: "naru-net", AdminDomain: envDomain, Version: "test"}
 	a, err := OpenWith(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), Outside{
 		Builder: fakeRegistry{}, Puller: fakeRegistry{}, Images: fakeImages{},
-		Starter: h.docker, Remover: h.docker, Switch: h.docker, Watcher: h.docker, Ports: h.docker, AppLogs: h.docker, Usage: h.docker, Networks: h.docker,
+		Starter: h.docker, Remover: h.docker, Switch: h.docker, Watcher: h.docker, Ports: h.docker, AppLogs: h.docker, Usage: h.docker, Networks: h.docker, Inspect: h.docker,
 		Code: fakeGit{}, DNS: netcheck.NewDNS(lookup), Stats: fakeStats{}, Sender: h.caddy, Certs: h.certs, Snippet: fakeSnippet{},
 		Clock: system.Clock{}, Random: system.Random{}, ReadyTimeout: 5 * time.Second, WatchEvery: o.watchEvery,
 	})
@@ -1464,6 +1477,118 @@ func TestAServiceCanJoinOtherNetworks(t *testing.T) {
 	}
 	if s := h.service(1); s.Networks != "cairn_default db-net" {
 		t.Fatalf("%q", s.Networks)
+	}
+}
+
+// ── 저장소로 옮기기 (넘겨받기) ──────────────
+
+func TestMovingARunningContainerToARepository(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	user := func(n string) model.DockerNetwork { return model.DockerNetwork{Name: n, UserDefined: true} }
+	h.docker.set("cairn-web-1", model.ContainerState{Name: "cairn-web-1", Running: true, State: "running", Status: "Up 3 days", Ports: []model.Port{3000},
+		Project: "cairn", Networks: []model.DockerNetwork{user("cairn_default"), user("naru-net")}})
+	h.docker.set("lonely", model.ContainerState{Name: "lonely", Running: true, State: "running", Networks: []model.DockerNetwork{user("x")}})
+	h.docker.mu.Lock()
+	h.docker.details = map[string]model.ContainerDetails{
+		"cairn-web-1": {
+			Env:      []string{"DATABASE_URL=postgres://u:hunter2@cairn-db-1/app", "PATH=/usr/bin", "NODE_ENV=production", "CERT=line one\nline two"},
+			ImageEnv: []string{"PATH=/usr/bin"},
+			Binds:    []string{"/srv/uploads:/app/uploads"}, NamedVolumes: []string{"cairn_cache:/cache"},
+			Source: "https://github.com/me/cairn",
+		},
+		"lonely": {Env: []string{"A=1"}},
+	}
+	h.docker.mu.Unlock()
+
+	// 지금: 외부 연결로 주소를 붙여 쓰고 있다 (웹서버 설정도 있다)
+	h.post("/services/new", url.Values{"kind": {"external"}, "upstream": {"cairn-web-1:3000"}, "domain": {"cairn.example.com"}, "name": {"cairn"}})
+	if code, _, _ := h.post("/services/1/web", url.Values{"headers": {"X-Frame-Options: DENY"}}); code != http.StatusSeeOther {
+		t.Fatalf("%d", code)
+	}
+	if _, _, page := h.get("/"); !strings.Contains(page, `href="/services/new?kind=repo&amp;adopt=cairn-web-1"`) {
+		t.Fatal("a running container has the move button, linked or not")
+	}
+
+	// 화면: 읽은 값으로 채워져 있고, 환경 변수는 이름만
+	_, _, form := h.get("/services/new?kind=repo&adopt=cairn-web-1")
+	for _, want := range []string{`name="adopt" value="cairn-web-1"`, `name="source" value=""`, `<span class="mono">https://github.com/me/cairn</span>`, `name="port" value="3000"`,
+		`name="networks" value="cairn_default"`, "/srv/uploads:/app/uploads", "cairn_cache:/cache",
+		`name="env_from" value="DATABASE_URL" checked`, `name="env_from" value="NODE_ENV" checked`, `name="env_from" value="PATH" >`,
+		`name="take_over" value="1" checked`, "cairn.example.com", "<details class=\"more\" open>"} {
+		if !strings.Contains(form, want) {
+			t.Errorf("the form is missing %q", want)
+		}
+	}
+	if strings.Contains(form, "hunter2") || strings.Contains(form, "cairn-db-1/app") || strings.Contains(form, "line one") {
+		t.Fatal("values never reach the screen")
+	}
+	// Naru의 것이나 없는 것은 넘겨받을 수 없다 — 보통의 새 서비스 화면이 된다. 보내는 서비스가 없으면 옮길 주소도 없다
+	if _, _, form := h.get("/services/new?kind=repo&adopt=naru-caddy"); strings.Contains(form, `name="adopt"`) {
+		t.Fatal("only containers Naru did not start can be taken over")
+	}
+	if _, _, form := h.get("/services/new?kind=repo&adopt=lonely"); !strings.Contains(form, `name="adopt" value="lonely"`) || strings.Contains(form, `name="take_over"`) {
+		t.Fatal("without a service sending there, there are no addresses to move")
+	}
+
+	// 여러 줄 값은 가져오지 않는다 — 말하고, 고른 것은 그대로 다시 보여 준다
+	adopt := url.Values{"kind": {"repo"}, "source": {"https://github.com/me/cairn"}, "name": {"cairn-app"}, "adopt": {"cairn-web-1"},
+		"port": {"3000"}, "networks": {"cairn_default"}, "env": {"NODE_ENV=staging"}, "take_over": {"1"}}
+	adopt["env_from"] = []string{"DATABASE_URL", "CERT"}
+	code, _, body := h.post("/services/new", adopt)
+	if code != http.StatusBadRequest || !strings.Contains(body, "여러 줄 값은") || !strings.Contains(body, `name="env_from" value="CERT" checked`) ||
+		strings.Contains(body, `name="env_from" value="NODE_ENV" checked`) || strings.Contains(body, "hunter2") {
+		t.Fatalf("%d", code)
+	}
+	if all, _ := h.services().List(ctx); len(all) != 1 {
+		t.Fatal("nothing was created")
+	}
+
+	// 만들기: 값은 서버 안에서만 복사된다
+	adopt["env_from"] = []string{"DATABASE_URL", "NODE_ENV", "NOT_THERE"}
+	code, loc, _ := h.post("/services/new", adopt)
+	if code != http.StatusSeeOther || strings.Contains(loc, "hunter2") {
+		t.Fatalf("%d %q", code, loc)
+	}
+	h.app.wait()
+	sec, _ := h.secretsOf().Get(ctx, 2)
+	if got := strings.Join(sec.Env.List(), "|"); got != "DATABASE_URL=postgres://u:hunter2@cairn-db-1/app|NODE_ENV=production|NODE_ENV=staging" {
+		t.Fatalf("the chosen ones come first, what was typed wins: %q", got)
+	}
+	spec := h.docker.specOf("naru-cairn-app-1")
+	if !slices.Contains(spec.Env, "DATABASE_URL=postgres://u:hunter2@cairn-db-1/app") || strings.Join(spec.ExtraNetworks, " ") != "cairn_default" {
+		t.Fatalf("%+v", spec)
+	}
+
+	// 배포가 성공해서 주소와 웹서버 설정이 옮겨 왔다. 옛 컨테이너와 옛 서비스는 그대로 있다
+	if old, fresh := h.service(1), h.service(2); len(old.Domains) != 0 || len(fresh.Domains) != 1 || fresh.Domains[0].Domain.String() != "cairn.example.com" || fresh.TakesOver != 0 {
+		t.Fatalf("old=%v new=%v mark=%d", old.Domains, fresh.Domains, fresh.TakesOver)
+	}
+	if ws, _ := store.NewWebSettings(h.app.db).Get(ctx, 2); len(ws.Headers) != 1 || ws.Headers[0].Name != "X-Frame-Options" {
+		t.Fatalf("%+v", ws)
+	}
+	h.waitFor("the address goes to the new container", func(cfg string) bool {
+		return strings.Contains(cfg, "naru-cairn-app:3000") && !strings.Contains(cfg, "cairn-web-1:3000")
+	})
+	deps, _ := h.history().Recent(ctx, 2, 5)
+	if dep, _ := h.history().Get(ctx, deps[0].ID); !strings.Contains(dep.Log, "주소 1개와 웹서버 설정을 이 서비스로 옮겼어요") || strings.Contains(dep.Log, "hunter2") {
+		t.Fatalf("%s", dep.Log)
+	}
+	h.docker.mu.Lock()
+	still := h.docker.states["cairn-web-1"].Running
+	h.docker.mu.Unlock()
+	if !still {
+		t.Fatal("the old container is never stopped")
+	}
+	if _, _, page := h.get("/services/2"); strings.Contains(page, "옮겨 와요") {
+		t.Fatal("the notice is gone once the move has happened")
+	}
+
+	// 화면이 보낸 표시만으로는 남의 서비스 주소를 옮길 수 없다 — 그 컨테이너로 보내는 서비스가 있어야 한다
+	h.post("/services/new", url.Values{"kind": {"repo"}, "source": {"https://github.com/me/x"}, "name": {"sneaky"}, "adopt": {"lonely"}, "take_over": {"1"}})
+	h.app.wait()
+	if s := h.service(3); s.TakesOver != 0 || len(h.service(2).Domains) != 1 {
+		t.Fatalf("%+v", s)
 	}
 }
 

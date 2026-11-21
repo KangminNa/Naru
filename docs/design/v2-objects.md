@@ -145,7 +145,7 @@
 | 인터페이스 | 하는 일 | 구현 |
 |---|---|---|
 | `ServiceViewer` | 화면에 보여줄 서비스 모습(홈 카드·상세·배포 기록·로그)을 모은다. 비밀은 담지 않는다. 로그는 앱 출력과 받은 요청을 시간순으로 합친다 (M6-2) | `serviceViewer` |
-| `ContainerFinder` | Naru가 띄우지 않은, 이 서버의 다른 컨테이너를 찾는다 — 홈의 목록(compose 묶음별, 어느 외부 연결 서비스가 보내는지, 기본 bridge에만 있는지)과 외부 연결 칸의 제안. **보기만 한다** | `containerFinder` |
+| `ContainerFinder` | Naru가 띄우지 않은, 이 서버의 다른 컨테이너를 찾는다 — 홈의 목록(compose 묶음별, 어느 외부 연결 서비스가 보내는지, 기본 bridge에만 있는지), 외부 연결 칸의 제안, 저장소로 옮길 때 채울 값(환경 변수는 이름만). **보기만 한다** | `containerFinder` |
 | `ServerStats` | 서버의 CPU·메모리·디스크를 알려준다 | `stats.ProcSampler` |
 
 ### I. 웹서버 설정 정하기 — `websettings` (M5)
@@ -178,6 +178,8 @@
 | `AccessLogReader` | 웹서버가 남긴 요청 기록 파일에서 그 주소들의 최근 요청을 읽는다 (파일 끝 4MB만) | `caddy.AccessLogFile` |
 | `AlertSender` | 알림 하나를 그 주소의 형식으로 보낸다 (10초 제한, 응답 본문은 읽고 버린다) | `httppost.AlertPoster` |
 | `SnippetCompiler` | 고급 칸의 Caddyfile 지시어를 웹서버 형식으로 바꾼다 — 그 사이트의 경로 처리만 꺼내고 나머지는 "적용되지 않음"으로 알린다 | `caddy.AdaptCompiler` (Caddy 관리 API `/adapt`) |
+| `ContainerInspector` | 컨테이너 하나의 환경 변수·볼륨·출처 라벨을 읽는다 (값은 비밀 — 화면 계층은 쓰지 않는다) | `docker.Containers` |
+| `DomainMover` | 한 서비스의 주소와 웹서버 설정을 다른 서비스로 한 트랜잭션에 옮긴다 | `store.DomainMoves` |
 | `CodeDownloader` | 저장소 코드를 내려받는다 (토큰은 인자·설정 파일에 남기지 않는다) | `git.Downloader` |
 | `WorkFolder` | 잠깐 쓸 작업 폴더를 빌려주고 돌려받는다. 그 안의 경로를 심볼릭 링크로 빠져나가지 않게 찾아 준다 | `files.TempFolders` |
 | `BuildContextPacker` | 빌드할 폴더를 묶는다 (`.git`·`.dockerignore` 제외). 폴더에 없는 파일(`.env` 파일 칸)을 더해 넣는다 — 디스크에 쓰지 않는다 | `files.TarPacker` |
@@ -329,6 +331,9 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `CodeSource` | 내려받을 코드 — 저장소·브랜치·토큰 |
 | `ContainerSpec` · `ContainerState` · `ContainerStates` | 띄울 컨테이너(앱 네트워크 말고 더 붙일 네트워크 포함) · 컨테이너 하나의 상태(이미지가 연 포트, 이미지 이름, compose 묶음, 붙은 네트워크, Naru 서비스 번호 포함) · 이름별 상태 (nil이면 Docker를 읽지 못함) |
 | `NetworkNames` | 앱 컨테이너를 더 붙일 Docker 네트워크 이름들 — 이름 모양만 받고 `bridge`·`host`·`none`은 거절, 8개까지. 그 네트워크의 DB 같은 컨테이너에 앱이 닿게 한다 |
+| `ContainerSeed` · `SeedEnv` | 컨테이너를 저장소 서비스로 옮길 때 화면에 채울 값(포트·볼륨·다른 네트워크·저장소 주소 짐작, 옮기지 않는 이름 있는 볼륨, 이 컨테이너로 보내는 외부 연결 서비스와 그 주소) · 환경 변수 이름 하나(이미지가 정한 것인지). **값은 없다** |
+| `ContainerDetails` | 도구가 읽은 컨테이너 하나 — 환경 변수(값 포함), 이미지가 정한 환경 변수, 볼륨, 출처 라벨. **`web`·`cli`는 이 타입을 쓸 수 없다** |
+| `EnvFrom` | 넘겨받을 때 가져올 환경 변수 — 컨테이너 이름과 고른 이름들. 값은 서비스 쪽이 Docker에서 읽어 비밀로 저장한다 (화면을 거치지 않는다) |
 | `OtherContainer` | Naru가 띄우지 않은 이 서버의 컨테이너 하나 — 이름·이미지·상태·포트·compose 묶음·사용자 정의 네트워크, 기본 bridge에만 있는지, 이 컨테이너로 보내는 외부 연결 서비스 |
 | `Deployment` | 배포 한 번의 기록 |
 | `DeployStatus` | 진행 중 · 성공 · 실패 |
@@ -795,6 +800,14 @@ type ServiceViewer interface {
 type ContainerFinder interface {
 	Others(ctx context.Context) ([]model.OtherContainer, error) // compose 묶음별·이름순. Docker를 읽지 못하면 비어 있다
 	Choices(ctx context.Context) ([]string, error)              // 외부 연결 칸에 제안할 돌고 있는 것 ("이름:포트")
+	// Seed는 그 컨테이너를 저장소 서비스로 옮길 때 화면에 채울 값이다 — 환경 변수는 이름만. 없는 컨테이너면 model.ErrNotFound.
+	Seed(ctx context.Context, name string) (model.ContainerSeed, error)
+}
+
+// DomainMover는 한 서비스의 주소와 웹서버 설정을 다른 서비스로 한 번에 옮긴다 — 넘겨받기가 성공했을 때 배포기가 부른다.
+// to의 "넘겨받을 서비스" 표시도 함께 지운다. 옮긴 주소 수를 돌려준다.
+type DomainMover interface {
+	Move(ctx context.Context, from, to model.ServiceID) (moved int, err error)
 }
 
 // ServerStats는 서버의 CPU·메모리·디스크를 알려준다.
@@ -880,6 +893,11 @@ type ContainerLogReader interface {
 	Recent(ctx context.Context, container string, n int) ([]model.LogLine, error)
 }
 
+// ContainerInspector는 컨테이너 하나의 환경 변수·볼륨·출처를 읽는다. 환경 변수 값은 비밀이다 — web·cli는 쓰지 않는다 (R10).
+type ContainerInspector interface {
+	Inspect(ctx context.Context, name string) (model.ContainerDetails, error) // 없는 컨테이너면 model.ErrNotFound
+}
+
 // NetworkJoiner는 컨테이너가 붙은 네트워크를 알려주고, 컨테이너를 네트워크에 붙이고 뗀다.
 type NetworkJoiner interface {
 	NetworksOf(ctx context.Context, container string) ([]model.DockerNetwork, error) // 없는 컨테이너면 model.ErrNotFound
@@ -953,9 +971,9 @@ type RandomTokens interface {
 | `adminDomainSetting` · `certEmailSetting` · `setupProgress` | SettingStore · EventPublisher (+ 환경 변수 값은 만들 때 받는다) |
 | `nameChooser` | ServiceReader |
 | `domainChecker` | DomainStore · AdminDomainSetting |
-| `serviceEditor` | ServiceReader · ServiceStore · DomainStore · SecretStore · NameChooser · DomainChecker · KindLookup · RandomTokens · EventPublisher |
+| `serviceEditor` | ServiceReader · ServiceStore · DomainStore · SecretStore · NameChooser · DomainChecker · KindLookup · RandomTokens · EventPublisher · ContainerInspector(넘겨받을 때 고른 환경 변수의 값) |
 | `serviceLauncher` | ServiceEditor · KindLookup · Deployer |
-| `deployer` | DeployLock · DeployHistoryStore · DeployHistoryReader · DeployLog · ServiceReader · LiveStateStore · KindLookup · OldVersionCleaner · EventPublisher · WebServerSync |
+| `deployer` | DeployLock · DeployHistoryStore · DeployHistoryReader · DeployLog · ServiceReader · LiveStateStore · KindLookup · OldVersionCleaner · EventPublisher · WebServerSync · DomainMover(넘겨받기 — 새 것이 응답한 뒤 주소를 옮긴다) |
 | `serviceControl` | ServiceReader · ServiceStore · LiveStateStore · DeployLock · ContainerSwitch · ContainerRemover · ContainerWatcher · ImageCleaner · SiteFiles · DeployHistoryReader · EventPublisher |
 | `RepoBuilder` | WorkFolder · CodeDownloader · SecretStore · DockerfilePortReader · BuildContextPacker · ImageBuilder |
 | `ImageFetcher` | ImagePuller |
@@ -967,7 +985,7 @@ type RandomTokens interface {
 | `siteMapBuilder` | ServiceReader · KindLookup · AdminDomainSetting · CertEmailSetting · SetupProgress · CertificateReader · Clock · WebSettingsStore |
 | `webServerSync` | SiteMapBuilder · ConfigWriter · ConfigSender(`AdminSocketGuard`로 감싼 것) · WebServerReach · EventSubscriber |
 | `webServerReach` | NetworkJoiner (+ 웹서버 컨테이너 이름·앱 네트워크 이름은 만들 때 받는다) |
-| `containerFinder` | ServiceReader · ContainerWatcher (+ 숨길 컨테이너 이름 — Naru 자신과 웹서버 — 은 만들 때 받는다) |
+| `containerFinder` | ServiceReader · ContainerWatcher · ContainerInspector (+ 숨길 컨테이너 이름 — Naru 자신과 웹서버 — 과 앱 네트워크 이름은 만들 때 받는다) |
 | `serviceViewer` | ServiceReader · SecretStore · DeployHistoryReader · ContainerWatcher · KindLookup · AdminDomainSetting · Deployer · CertificateReader · Clock · WebSettingsStore · ContainerLogReader · AccessLogReader · HealthWatcher |
 | `webSettingsEditor` | ServiceReader · WebSettingsStore · SnippetCompiler · LoginHasher · WebServerSync |
 | `healthWatcher` | ServiceReader · KindLookup · ContainerWatcher · PortChecker · Deployer · WebServerSync · CertificateReader · AdminDomainSetting · Diagnoser · UsageReader · Clock · EventPublisher |
@@ -1071,7 +1089,7 @@ WebServerSync (SiteMapChanged를 듣거나 30초마다)
 | R7 | SQL은 `store`에만 |
 | R8 | 바깥 세계에 닿는 것 — `os/exec`·`syscall`·`archive/tar` import, 파일 읽고 쓰기(`os.WriteFile`…), 연결(`net.Dial`…, `http.Client`…) — 은 도구·저장·조립(`app`)에만 |
 | R9 | 종류 이름으로 분기하는 코드는 `kinds`에만 |
-| R10 | `web`·`cli`는 `model.ServiceSecrets`·`model.PasswordHash`·`model.WebSettings`·`model.BasicLogin`·`model.AlertChannel`을 쓰지 않는다 (그것을 주고받는 인터페이스도) |
+| R10 | `web`·`cli`는 `model.ServiceSecrets`·`model.PasswordHash`·`model.WebSettings`·`model.BasicLogin`·`model.AlertChannel`·`model.ContainerDetails`를 쓰지 않는다 (그것을 주고받는 인터페이스도) |
 | R11 | 검사용 정규식은 `model`에만 |
 | R12 | 설정을 환경 변수에서 읽는 건(`os.Getenv`·`LookupEnv`) `app`·`cmd`뿐이다 — 다른 패키지는 만들 때 값을 받는다. 도구가 자식 프로세스(git)에 환경을 넘기는 `os.Environ`은 허용 |
 

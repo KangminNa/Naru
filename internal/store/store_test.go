@@ -584,3 +584,61 @@ func TestV1AlertChannelsComeAlong(t *testing.T) {
 		t.Fatal("once")
 	}
 }
+
+// 넘겨받기: 주소와 웹서버 설정이 한 번에 옮겨 가고, 표시가 지워진다.
+func TestMovingDomainsAndWebSettingsToAnotherService(t *testing.T) {
+	db := open(t, t.TempDir())
+	r, domains, web := NewServices(db), NewDomains(db), NewWebSettings(db)
+	old, _ := r.Create(ctx, model.NewService{Name: name("cairn"), Kind: model.KindExternal, External: "cairn-web-1:3000"})
+	fresh, _ := r.Create(ctx, model.NewService{Name: name("cairn-2"), Kind: model.KindRepo, Source: "https://github.com/me/cairn", TakesOver: old})
+	other, _ := r.Create(ctx, model.NewService{Name: name("blog"), Kind: model.KindImage, Source: "me/blog"})
+	add := func(id model.ServiceID, d string) {
+		dn, _ := model.ParseDomainName(d)
+		if err := domains.Add(ctx, id, model.DomainInput{Domain: dn, HTTPS: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add(old, "cairn.example.com")
+	add(old, "www.cairn.example.com")
+	add(other, "blog.example.com")
+	web.Set(ctx, old, model.WebSettings{Maintenance: true, Advanced: "encode gzip"})
+	web.Set(ctx, fresh, model.WebSettings{Advanced: "to be replaced"})
+	if s, _ := r.Get(ctx, fresh); s.TakesOver != old {
+		t.Fatalf("the mark is stored: %+v", s.TakesOver)
+	}
+
+	n, err := NewDomainMoves(db).Move(ctx, old, fresh)
+	if err != nil || n != 2 {
+		t.Fatalf("%d %v", n, err)
+	}
+	a, b, c := must(r.Get(ctx, old)), must(r.Get(ctx, fresh)), must(r.Get(ctx, other))
+	if len(a.Domains) != 0 || len(b.Domains) != 2 || !b.Domains[0].HTTPS || len(c.Domains) != 1 || b.TakesOver != 0 {
+		t.Fatalf("old=%v new=%v other=%v mark=%d", a.Domains, b.Domains, c.Domains, b.TakesOver)
+	}
+	if ws, _ := web.Get(ctx, fresh); !ws.Maintenance || ws.Advanced != "encode gzip" {
+		t.Fatalf("the web settings came along: %+v", ws)
+	}
+	if ws, _ := web.Get(ctx, old); ws.Maintenance || ws.Advanced != "" {
+		t.Fatalf("and left the old service: %+v", ws)
+	}
+
+	// 옛 서비스가 이미 없어도(지웠어도) 표시는 지워진다. 옛 것에 설정이 없으면 새 것의 설정을 건드리지 않는다
+	again, _ := r.Create(ctx, model.NewService{Name: name("again"), Kind: model.KindRepo, Source: "https://github.com/me/x", TakesOver: 999})
+	web.Set(ctx, again, model.WebSettings{Advanced: "kept"})
+	if n, err := NewDomainMoves(db).Move(ctx, 999, again); err != nil || n != 0 {
+		t.Fatalf("%d %v", n, err)
+	}
+	if s := must(r.Get(ctx, again)); s.TakesOver != 0 {
+		t.Fatal("the mark is cleared even when there was nothing to move")
+	}
+	if ws, _ := web.Get(ctx, again); ws.Advanced != "kept" {
+		t.Fatalf("%+v", ws)
+	}
+}
+
+func must(s model.Service, err error) model.Service {
+	if err != nil {
+		panic(err)
+	}
+	return s
+}

@@ -25,6 +25,7 @@ type Parts struct {
 	Cleaner  contract.OldVersionCleaner
 	Events   contract.EventPublisher
 	Sync     contract.WebServerSync // 옛 것을 내리기 전에 웹서버가 새 것을 가리키게 한다
+	Mover    contract.DomainMover   // 넘겨받기 — 새 것이 응답한 뒤 옛 서비스의 주소를 옮겨 온다 (없으면 옮기지 않는다)
 }
 
 type deployer struct {
@@ -134,6 +135,16 @@ func (d deployer) run(s model.Service, tools contract.KindTools, did model.Deplo
 	}
 	if err == nil {
 		err = d.p.Live.Save(ctx, s.ID, live)
+	}
+	// 넘겨받기: 새 것이 응답하고 지금 상태를 저장한 뒤에만, 웹서버를 맞추기 전에 주소를 옮긴다 — 한 번 맞추면 새 것으로 간다.
+	// 옮기지 못하면 배포는 그대로 성공이고, 표시가 남아 다음 성공 때 다시 옮긴다.
+	if err == nil && s.TakesOver != 0 && d.p.Mover != nil {
+		if n, merr := d.p.Mover.Move(ctx, s.TakesOver, s.ID); merr != nil {
+			fmt.Fprintf(w, "주소를 옮기지 못했어요 — 다음 배포에서 다시 해요 / could not move the addresses, will retry on the next deploy: %v\n", merr)
+		} else {
+			fmt.Fprintf(w, "주소 %d개와 웹서버 설정을 이 서비스로 옮겼어요. 옛 컨테이너는 그대로 돌고 있어요 — 확인한 뒤 직접 내리세요 / "+
+				"moved %d address(es) and the web settings here; the old container keeps running — stop it yourself once you have checked\n", n, n)
+		}
 	}
 	if err == nil {
 		if serr := d.p.Sync.SyncNow(ctx); serr != nil {

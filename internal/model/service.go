@@ -54,6 +54,16 @@ type ServiceInput struct {
 	Volumes    Volumes
 	Networks   NetworkNames // 컨테이너 종류만 — 앱 네트워크 말고 더 붙일 네트워크
 	AutoDeploy bool
+
+	// 돌고 있는 컨테이너를 넘겨받을 때만
+	EnvFrom  EnvFrom   // 그 컨테이너에서 가져올 환경 변수 (이름만 — 값은 서비스 쪽이 읽는다)
+	TakeOver ServiceID // 배포가 성공하면 이 외부 연결 서비스의 주소와 웹서버 설정을 옮겨 온다 (0이면 안 옮김)
+}
+
+// EnvFrom은 다른 컨테이너에서 가져올 환경 변수다 — 값은 화면을 거치지 않는다.
+type EnvFrom struct {
+	Container string
+	Names     []string
 }
 
 // Source는 이 입력의 소스를 글자로 — 저장소 주소나 이미지 이름. 종류가 정한 칸만 채워져 있다.
@@ -91,6 +101,7 @@ type Service struct {
 	Port       Port
 	Networks   string // 앱 네트워크 말고 더 붙일 네트워크 이름들 (빈칸으로 나눔)
 	AutoDeploy bool
+	TakesOver  ServiceID // 다음 배포가 성공하면 이 서비스의 주소와 웹서버 설정을 옮겨 온다 (0이면 없음)
 	Live       LiveState
 	HookLog    HookLog
 	Domains    []Domain
@@ -157,6 +168,7 @@ type NewService struct {
 	Networks   string
 	AutoDeploy bool
 	Alias      string
+	TakesOver  ServiceID
 }
 
 // ServiceSettings는 고칠 수 있는 값이다.

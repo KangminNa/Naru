@@ -60,6 +60,7 @@ Paste an nginx config and it is turned into those fields. Applying checks agains
 - **"Needs attention"** at the top of the home screen — apps that stopped, apps listening on a different port (with a [switch port] button), DNS not pointing here, certificates ending soon, webhooks that never arrived.
 - **Logs tab** — app output and incoming requests on one screen, in time order. CPU and memory per service.
 - **Other containers on this server** — the home screen lists what Naru didn't start, grouped by compose project (view only — Naru never stops or removes them), with a button to give one an address.
+- **Move to a repository** — take over a running container as a push-to-deploy repository service. Port, volumes and networks are read for you; environment variables are shown by name only and their values are copied inside the server. Addresses and web server settings move only after the new one answers, and the old container is never stopped.
 - **Join other networks** — a repository or image service can also join another compose network, to reach a database that lives there.
 
 **First run · admin**

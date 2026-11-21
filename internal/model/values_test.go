@@ -310,3 +310,23 @@ func TestNetworkNames(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvVarsFromAnotherContainer(t *testing.T) {
+	typed, _, _ := ParseEnvVars("NODE_ENV=production\nEXTRA=1")
+	e, err := EnvVarsFrom([]string{"DATABASE_URL=postgres://u:p@db/app", "NODE_ENV=development"}, typed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(e.List(), "|"); got != "DATABASE_URL=postgres://u:p@db/app|NODE_ENV=development|NODE_ENV=production|EXTRA=1" {
+		t.Fatalf("the container's come first, so what was typed wins: %s", got)
+	}
+	if e, err := EnvVarsFrom(nil, typed); err != nil || e.Text() != typed.Text() {
+		t.Fatal("nothing chosen leaves what was typed")
+	}
+	for in, want := range map[string]string{"KEY=line one\nline two": "envmultiline", "1BAD=x": "env", "noequals": "env"} {
+		_, err := EnvVarsFrom([]string{"OK=1", in}, typed)
+		if ie, ok := AsInputError(err); !ok || ie.Code != want || ie.Line != 2 {
+			t.Errorf("%q: %v", in, err)
+		}
+	}
+}

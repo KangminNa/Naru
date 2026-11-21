@@ -388,6 +388,14 @@ type ServiceViewer interface {
 type ContainerFinder interface {
 	Others(ctx context.Context) ([]model.OtherContainer, error) // compose 묶음별·이름순. Docker를 읽지 못하면 비어 있다
 	Choices(ctx context.Context) ([]string, error)              // 외부 연결 칸에 제안할 돌고 있는 것 ("이름:포트")
+	// Seed는 그 컨테이너를 저장소 서비스로 옮길 때 화면에 채울 값이다 — 환경 변수는 이름만. 없는 컨테이너면 model.ErrNotFound.
+	Seed(ctx context.Context, name string) (model.ContainerSeed, error)
+}
+
+// DomainMover는 한 서비스의 주소와 웹서버 설정을 다른 서비스로 한 번에 옮긴다 — 넘겨받기가 성공했을 때 배포기가 부른다.
+// to의 "넘겨받을 서비스" 표시도 함께 지운다. 옮긴 주소 수를 돌려준다.
+type DomainMover interface {
+	Move(ctx context.Context, from, to model.ServiceID) (moved int, err error)
 }
 
 // ServerStats는 서버의 CPU·메모리·디스크를 알려준다.
@@ -471,6 +479,11 @@ type SiteFiles interface {
 // ContainerLogReader는 컨테이너가 찍은 최근 n줄을 시각과 함께 읽는다.
 type ContainerLogReader interface {
 	Recent(ctx context.Context, container string, n int) ([]model.LogLine, error)
+}
+
+// ContainerInspector는 컨테이너 하나의 환경 변수·볼륨·출처를 읽는다. 환경 변수 값은 비밀이다 — web·cli는 쓰지 않는다 (R10).
+type ContainerInspector interface {
+	Inspect(ctx context.Context, name string) (model.ContainerDetails, error) // 없는 컨테이너면 model.ErrNotFound
 }
 
 // NetworkJoiner는 컨테이너가 붙은 네트워크를 알려주고, 컨테이너를 네트워크에 붙이고 뗀다.

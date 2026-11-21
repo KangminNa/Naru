@@ -16,21 +16,23 @@ type Services struct{ db *DB }
 func NewServices(db *DB) Services { return Services{db} }
 
 const serviceColumns = `id, name, kind, source, branch, build_path, folder, upstream, port, auto_deploy,
-	container, instance, release, stopped, hook_at, hook_result, created_at, networks`
+	container, instance, release, stopped, hook_at, hook_result, created_at, networks, takes_over`
 
 func scanService(row interface{ Scan(...any) error }) (model.Service, error) {
 	var (
 		s                    model.Service
+		takesOver            int64
 		id, hookAt, created  int64
 		name, kind, hookRes  string
 		port                 int
 		alias, inst, release string
 	)
 	err := row.Scan(&id, &name, &kind, &s.Source, &s.Branch, &s.BuildPath, &s.Folder, &s.External, &port, &s.AutoDeploy,
-		&alias, &inst, &release, &s.Live.Stopped, &hookAt, &hookRes, &created, &s.Networks)
+		&alias, &inst, &release, &s.Live.Stopped, &hookAt, &hookRes, &created, &s.Networks, &takesOver)
 	if err != nil {
 		return s, err
 	}
+	s.TakesOver = model.ServiceID(takesOver)
 	s.ID, s.Kind, s.Port = model.ServiceID(id), model.KindName(kind), model.Port(port)
 	s.Name, _ = model.ParseServiceName(name)
 	s.Live.Alias, s.Live.Instance, s.Live.Release, s.Live.Port = alias, inst, release, model.Port(port)
@@ -123,9 +125,9 @@ func (r Services) Create(ctx context.Context, s model.NewService) (model.Service
 	if s.ID != 0 {
 		id = int64(s.ID)
 	}
-	res, err := r.db.sql.ExecContext(ctx, `INSERT INTO services (id, name, kind, source, branch, build_path, folder, upstream, port, auto_deploy, container, networks)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, s.Name.String(), string(s.Kind), s.Source, s.Branch, s.BuildPath, s.Folder, s.External, int(s.Port), s.AutoDeploy, s.Alias, s.Networks)
+	res, err := r.db.sql.ExecContext(ctx, `INSERT INTO services (id, name, kind, source, branch, build_path, folder, upstream, port, auto_deploy, container, networks, takes_over)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, s.Name.String(), string(s.Kind), s.Source, s.Branch, s.BuildPath, s.Folder, s.External, int(s.Port), s.AutoDeploy, s.Alias, s.Networks, int64(s.TakesOver))
 	if err != nil {
 		return 0, err
 	}

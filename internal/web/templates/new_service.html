@@ -1,7 +1,7 @@
 {{define "root"}}{{template "app" .}}{{end}}
 {{define "title"}}{{t "new.heading"}}{{end}}
 {{define "content"}}
-{{$f := .Data.Form}}
+{{$f := .Data.Form}}{{$a := .Data.Adopt}}
 <a class="back" href="/">← {{t "service.back"}}</a>
 <div class="hero"><div><h1>{{t "new.heading"}}</h1><p>{{t "new.sub"}}</p></div></div>
 
@@ -19,11 +19,15 @@
   {{template "error" .}}
   <form method="post" action="/services/new" class="form">
     <input type="hidden" name="kind" value="{{$f.Kind}}">
+    {{if and $a (eq $f.Kind "repo")}}
+    <input type="hidden" name="adopt" value="{{$a.Seed.Name}}">
+    <p class="flash ok" role="status">{{t "adopt.lead" $a.Seed.Name}}</p>
+    {{end}}
 
     {{if eq $f.Kind "repo" "static"}}
     <label class="field"><span>{{t "field.repo"}}</span>
       <input class="input mono" name="source" value="{{$f.Source}}" placeholder="https://github.com/me/app" required autofocus>
-      <small>{{if eq $f.Kind "repo"}}{{t "new.repo.hint"}}{{else}}{{t "new.static.hint"}}{{end}}</small></label>
+      <small>{{if eq $f.Kind "repo"}}{{t "new.repo.hint"}}{{else}}{{t "new.static.hint"}}{{end}}{{if and $a (eq $f.Kind "repo")}}{{with $a.Seed.Repo}} {{t "adopt.repo.label"}} <span class="mono">{{.}}</span>{{end}}{{end}}</small></label>
     {{end}}
     {{if eq $f.Kind "image"}}
     <label class="field"><span>{{t "field.image"}}</span>
@@ -50,13 +54,33 @@
       <textarea class="input mono" name="env" rows="4" placeholder="DATABASE_URL=postgres://…&#10;NODE_ENV=production">{{$f.Env}}</textarea>
       <small>{{t "env.hint"}}</small></label>
     {{end}}
+    {{if and $a (eq $f.Kind "repo")}}
+    {{if $a.Env}}
+    <fieldset class="field pick">
+      <legend>{{t "adopt.env"}}</legend>
+      <div class="pick-list">
+        {{range $a.Env}}<label class="check-label mono{{if .FromImage}} muted{{end}}"><input type="checkbox" name="env_from" value="{{.Name}}" {{if .Checked}}checked{{end}}> {{.Name}}</label>{{end}}
+      </div>
+      <small>{{t "adopt.env.hint"}}</small>
+    </fieldset>
+    {{end}}
+    {{end}}
     {{if eq $f.Kind "repo"}}
     <label class="field"><span>{{t "field.envfile"}}</span>
       <textarea class="input mono" name="env_file" rows="3" placeholder="NEXT_PUBLIC_API_URL=https://api.example.com">{{$f.EnvFile}}</textarea>
       <small>{{t "envfile.hint"}}</small></label>
     {{end}}
 
-    <details class="more">
+    {{if and $a (eq $f.Kind "repo")}}
+    {{if $a.Seed.Linked}}
+    <div class="takeover">
+      <label class="check-label"><input type="checkbox" name="take_over" value="1" {{if $a.TakeOver}}checked{{end}}> {{t "adopt.takeover" $a.Seed.LinkedName}}</label>
+      <small>{{with $a.Seed.LinkedDomains}}{{range $i, $d := .}}{{if $i}}, {{end}}<span class="mono">{{$d}}</span>{{end}} · {{end}}{{t "adopt.takeover.hint" $a.Seed.Name}}</small>
+    </div>
+    {{end}}
+    {{end}}
+
+    <details class="more"{{if $a}} open{{end}}>
       <summary>{{t "new.more"}}</summary>
       <div class="form">
         <label class="field"><span>{{t "field.name"}}</span>
@@ -80,7 +104,7 @@
           <small>{{t "new.port.hint"}}</small></label>
         <label class="field"><span>{{t "field.volumes"}}</span>
           <textarea class="input mono" name="volumes" rows="2" placeholder="/srv/app-data:/data">{{$f.Volumes}}</textarea>
-          <small>{{t "new.volumes.hint"}}</small></label>
+          <small>{{t "new.volumes.hint"}}{{if $a}}{{with $a.Seed.NamedVolumes}} {{t "adopt.volumes.named"}} {{range $i, $v := .}}{{if $i}}, {{end}}<span class="mono">{{$v}}</span>{{end}}{{end}}{{end}}</small></label>
         <label class="field"><span>{{t "field.networks"}}</span>
           <input class="input mono" name="networks" value="{{$f.Networks}}" placeholder="myapp_default" list="naru-networks">
           {{with $.Data.Networks}}<datalist id="naru-networks">{{range .}}<option value="{{.}}">{{end}}</datalist>{{end}}

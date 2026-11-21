@@ -4,6 +4,8 @@ package services
 
 import (
 	"context"
+	"slices"
+	"strings"
 
 	"github.com/KangminNa/naru/internal/contract"
 	"github.com/KangminNa/naru/internal/model"
@@ -76,11 +78,39 @@ type serviceEditor struct {
 	kinds   contract.KindLookup
 	random  contract.RandomTokens
 	events  contract.EventPublisher
+	inspect contract.ContainerInspector // 넘겨받을 때 고른 환경 변수의 값을 읽는다
 }
 
 func NewServiceEditor(reader contract.ServiceReader, store contract.ServiceStore, domains contract.DomainStore, secrets contract.SecretStore,
-	names contract.NameChooser, checker contract.DomainChecker, kinds contract.KindLookup, random contract.RandomTokens, events contract.EventPublisher) contract.ServiceEditor {
-	return serviceEditor{reader, store, domains, secrets, names, checker, kinds, random, events}
+	names contract.NameChooser, checker contract.DomainChecker, kinds contract.KindLookup, random contract.RandomTokens, events contract.EventPublisher,
+	inspect contract.ContainerInspector) contract.ServiceEditor {
+	return serviceEditor{reader, store, domains, secrets, names, checker, kinds, random, events, inspect}
+}
+
+// adopted는 넘겨받기에 딸린 것을 저장하기 전에 확인한다: 고른 환경 변수의 값을 그 컨테이너에서 읽어 앞에 두고
+// (화면에 적은 같은 이름이 이긴다), 주소를 옮겨 올 서비스가 정말 외부로 보내는 서비스인지 본다.
+func (e serviceEditor) adopted(ctx context.Context, in model.ServiceInput) (model.ServiceInput, error) {
+	if in.TakeOver != 0 {
+		from, err := e.reader.Get(ctx, in.TakeOver)
+		if err != nil || from.External == "" {
+			return in, model.InputError{Field: "takeover", Code: "takeover"}
+		}
+	}
+	if in.EnvFrom.Container == "" || len(in.EnvFrom.Names) == 0 {
+		return in, nil
+	}
+	details, err := e.inspect.Inspect(ctx, in.EnvFrom.Container)
+	if err != nil {
+		return in, model.InputError{Field: "env", Code: "adoptgone"}
+	}
+	var lines []string
+	for _, l := range details.Env {
+		if k, _, ok := strings.Cut(l, "="); ok && slices.Contains(in.EnvFrom.Names, k) {
+			lines = append(lines, l)
+		}
+	}
+	in.Env, err = model.EnvVarsFrom(lines, in.Env)
+	return in, err
 }
 
 func (e serviceEditor) toolsFor(k model.KindName) (contract.KindTools, error) {
@@ -100,6 +130,9 @@ func (e serviceEditor) Create(ctx context.Context, in model.ServiceInput) (model
 	if in, err = tools.Input.Check(in); err != nil {
 		return 0, err
 	}
+	if in, err = e.adopted(ctx, in); err != nil {
+		return 0, err
+	}
 	name, err := e.names.Choose(ctx, in)
 	if err != nil {
 		return 0, err
@@ -111,7 +144,7 @@ func (e serviceEditor) Create(ctx context.Context, in model.ServiceInput) (model
 	}
 	id, err := e.store.Create(ctx, model.NewService{
 		Name: name, Kind: in.Kind, Source: in.Source(), Branch: in.Branch.String(), BuildPath: in.BuildPath.String(),
-		Folder: in.Folder.String(), External: in.External.String(), Port: in.Port, Networks: in.Networks.String(), AutoDeploy: true,
+		Folder: in.Folder.String(), External: in.External.String(), Port: in.Port, Networks: in.Networks.String(), AutoDeploy: true, TakesOver: in.TakeOver,
 	})
 	if err != nil {
 		return 0, err

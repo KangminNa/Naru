@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,37 @@ type newServiceScreen struct {
 	Form       serviceForm
 	Containers []string // 외부 연결 칸 자동완성 — 이 서버의 다른 컨테이너
 	Networks   []string // "다른 네트워크" 칸 자동완성 — 다른 컨테이너들이 붙어 있는 네트워크
+	Adopt      *adoptView
+}
+
+// adoptView는 "저장소로 옮기기" — 돌고 있는 컨테이너에서 읽은 것 중 칸에 채우지 못하는 부분이다.
+type adoptView struct {
+	Seed     model.ContainerSeed
+	Env      []adoptEnv
+	TakeOver bool
+}
+
+type adoptEnv struct {
+	Name      string
+	FromImage bool
+	Checked   bool
+}
+
+// adoptOf는 넘겨받을 컨테이너를 다시 읽는다. chosen이 nil이면 처음 여는 것 — 이미지가 정한 것만 빼고 고른다.
+// 읽지 못하면(없어졌거나 Naru의 것이면) nil — 화면은 보통의 새 서비스 화면이 된다.
+func (s *Server) adoptOf(r *http.Request, name string, chosen []string, first, takeOver bool) *adoptView {
+	if name == "" {
+		return nil
+	}
+	seed, err := s.d.Finder.Seed(r.Context(), name)
+	if err != nil {
+		return nil
+	}
+	a := &adoptView{Seed: seed, TakeOver: seed.Linked != 0 && (first || takeOver)}
+	for _, e := range seed.Env {
+		a.Env = append(a.Env, adoptEnv{Name: e.Name, FromImage: e.FromImage, Checked: (first && !e.FromImage) || slices.Contains(chosen, e.Name)})
+	}
+	return a
 }
 
 // suggestions는 폼의 자동완성이다 — 돌고 있는 다른 컨테이너("이름:포트")와 그것들이 붙은 네트워크. 못 읽으면 제안만 없다.
@@ -62,8 +94,18 @@ func (s *Server) newServicePage(w http.ResponseWriter, r *http.Request) {
 			f.Upstream = up
 		}
 	}
+	// 홈의 [저장소로 옮기기] — 그 컨테이너에서 읽은 값으로 칸을 채운다
+	adopt := s.adoptOf(r, strings.TrimSpace(r.URL.Query().Get("adopt")), nil, true, false)
+	if adopt != nil {
+		// 저장소 주소는 채우지 않는다 — 이미지 라벨은 남이 만든 이미지의 저장소일 수 있다. 힌트로만 보여 준다.
+		f.Adopt, f.Volumes, f.Networks = adopt.Seed.Name, adopt.Seed.Volumes, adopt.Seed.Networks
+		if adopt.Seed.Port != 0 {
+			f.Port = strconv.Itoa(int(adopt.Seed.Port))
+		}
+	}
 	choices, networks := s.suggestions(r)
-	s.render(w, r, http.StatusOK, "new_service", view{Nav: "home", User: &u, Data: newServiceScreen{Kinds: kindNames(), Form: f, Containers: choices, Networks: networks}})
+	s.render(w, r, http.StatusOK, "new_service", view{Nav: "home", User: &u,
+		Data: newServiceScreen{Kinds: kindNames(), Form: f, Containers: choices, Networks: networks, Adopt: adopt}})
 }
 
 func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +118,8 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 		f.Token = "" // 토큰은 다시 그리지 않는다
 		choices, networks := s.suggestions(r)
 		s.render(w, r, http.StatusBadRequest, "new_service", view{Nav: "home", User: &u, Err: errKeyOf(err), ErrLine: errLineOf(err),
-			Data: newServiceScreen{Kinds: kindNames(), Form: f, Containers: choices, Networks: networks}})
+			Data: newServiceScreen{Kinds: kindNames(), Form: f, Containers: choices, Networks: networks,
+				Adopt: s.adoptOf(r, f.Adopt, f.EnvFrom, false, f.TakeOver)}})
 	}
 	kind, err := model.ParseKindName(f.Kind)
 	if err != nil {
@@ -87,6 +130,12 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(err)
 		return
+	}
+	// 주소를 옮겨 올 서비스는 화면이 보낸 번호가 아니라, 그 컨테이너로 보내는 서비스를 다시 찾아서 정한다
+	if f.Adopt != "" && f.TakeOver {
+		if seed, err := s.d.Finder.Seed(r.Context(), f.Adopt); err == nil {
+			in.TakeOver = seed.Linked
+		}
 	}
 	id, did, err := s.d.Launcher.Launch(r.Context(), in)
 	if id == 0 {

@@ -45,7 +45,7 @@ func TestMessagesAreComplete(t *testing.T) {
 // 값 객체·종류 담당자가 내는 InputError 코드는 모두 문구가 있어야 한다.
 func TestInputErrorCodesHaveMessages(t *testing.T) {
 	for _, code := range []string{"name", "nametaken", "domain", "domaintaken", "admindomain", "repo", "branch", "image",
-		"upstream", "path", "port", "env", "envfile", "volumes", "network", "kind", "email", "username",
+		"upstream", "path", "port", "env", "envfile", "volumes", "network", "takeover", "adoptgone", "kind", "email", "username",
 		"header", "ip", "route", "pathtarget", "pathself", "advanced", "weakpassword", "alerturl"} {
 		if _, ok := messages["ko"]["err."+code]; !ok {
 			t.Errorf("err.%s has no message", code)

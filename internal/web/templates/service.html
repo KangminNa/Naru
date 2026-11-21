@@ -27,6 +27,7 @@
 {{with .Data.Findings}}
 <ul class="findings">{{range .}}{{template "finding" .}}{{end}}</ul>
 {{end}}
+{{if $s.TakesOver}}<p class="flash warn" role="status">{{t "service.takeover"}} <a href="/services/{{$s.TakesOver}}">{{t "service.takeover.link"}}</a></p>{{end}}
 
 {{if .Data.Running}}
 <div class="notice warn"><span class="notice-icon">…</span>

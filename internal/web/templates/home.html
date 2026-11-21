@@ -63,7 +63,10 @@
         <b class="mono">{{.Name}}</b>
         <span>{{with .Ports}}{{t "others.port" (index . 0)}} · {{end}}{{.Status}}{{range .Networks}} · {{.}}{{end}}{{if .Linked}} · <a href="/services/{{.Linked}}">{{t "others.linked" .LinkedName}}</a>{{else if .OnlyBridge}} · <em class="warn">{{t "others.bridge"}}</em>{{end}}</span>
       </div>
-      {{if and .Running (not .Linked)}}<a class="btn small" href="/services/new?kind=external&amp;upstream={{.Upstream}}">{{t "others.attach"}}</a>{{end}}
+      {{if .Running}}<div class="other-actions">
+        {{if not .Linked}}<a class="btn small" href="/services/new?kind=external&amp;upstream={{.Upstream}}">{{t "others.attach"}}</a>{{end}}
+        <a class="btn small" href="/services/new?kind=repo&amp;adopt={{.Name}}">{{t "others.adopt"}}</a>
+      </div>{{end}}
     </div>
     {{end}}
     {{end}}

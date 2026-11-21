@@ -27,6 +27,11 @@ type serviceForm struct {
 	Volumes    string
 	Networks   string
 	AutoDeploy bool
+
+	// 돌고 있는 컨테이너를 넘겨받을 때만 (새 서비스 화면)
+	Adopt    string   // 넘겨받을 컨테이너 이름
+	EnvFrom  []string // 그 컨테이너에서 가져올 환경 변수 이름
+	TakeOver bool     // 성공하면 그 컨테이너로 보내던 서비스의 주소를 옮긴다
 }
 
 func readServiceForm(r *http.Request) serviceForm {
@@ -47,6 +52,9 @@ func readServiceForm(r *http.Request) serviceForm {
 		Volumes:    strings.ReplaceAll(r.FormValue("volumes"), "\r\n", "\n"),
 		Networks:   strings.TrimSpace(r.FormValue("networks")),
 		AutoDeploy: r.FormValue("auto_deploy") == "1",
+		Adopt:      strings.TrimSpace(r.FormValue("adopt")),
+		EnvFrom:    r.Form["env_from"],
+		TakeOver:   r.FormValue("take_over") == "1",
 	}
 }
 
@@ -68,6 +76,9 @@ func formFrom(f model.ServiceForm) serviceForm {
 // 환경 변수는 .env처럼 적어도 받는다 — 저장할 모양으로 고친 줄은 notes로 돌려준다.
 func (f serviceForm) input(kind model.KindName) (model.ServiceInput, []model.EnvNote, error) {
 	in := model.ServiceInput{Kind: kind, Token: f.Token, ClearToken: f.ClearToken, AutoDeploy: f.AutoDeploy}
+	if f.Adopt != "" {
+		in.EnvFrom = model.EnvFrom{Container: f.Adopt, Names: f.EnvFrom}
+	}
 	var err error
 	if f.Name != "" {
 		if in.Name, err = model.ParseServiceName(f.Name); err != nil {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -173,6 +174,10 @@ func TestEachEventKind(t *testing.T) {
 		{model.CertificateEndingSoon{Domain: "blog.example.com", NotAfter: time.Now().Add(5 * 24 * time.Hour)}, "certificate.ending", model.AlertProblem},
 		{model.DiskLow{Free: 8 << 30, Total: 100 << 30, Urgent: true}, "disk.low", model.AlertProblem},
 		{model.DiskOK{Free: 30 << 30, Total: 100 << 30}, "disk.ok", model.AlertRecovery},
+		{model.ResourceHigh{What: "memory", Percent: 93}, "memory.high", model.AlertProblem},
+		{model.ResourceOK{What: "cpu", Percent: 40}, "cpu.ok", model.AlertRecovery},
+		{model.ServiceRestarted{Service: 1, Name: "blog", OOM: true, Count: 3}, "service.oom", model.AlertProblem},
+		{model.ServiceRestarted{Service: 1, Name: "blog", Count: 4}, "service.restarted", model.AlertProblem},
 	}
 	for i, c := range cases {
 		bus.Publish(c.e)
@@ -185,7 +190,13 @@ func TestEachEventKind(t *testing.T) {
 	if s.sent[1].a.Service != "blog" || !strings.Contains(s.sent[1].a.Detail, "#7") {
 		t.Errorf("a failed deploy names its service and deployment: %+v", s.sent[1].a)
 	}
-	if low := s.sent[len(cases)-2].a; !strings.Contains(low.Title, "8.0 GB (8%)") || !strings.Contains(low.Title, "거의 찼어요") || !strings.Contains(low.Detail, "docker system df") {
+	if low := s.sent[slices.IndexFunc(cases, func(c struct {
+		e     model.Event
+		event string
+		level model.AlertLevel
+	}) bool {
+		return c.event == "disk.low"
+	})].a; !strings.Contains(low.Title, "8.0 GB (8%)") || !strings.Contains(low.Title, "거의 찼어요") || !strings.Contains(low.Detail, "docker system df") {
 		t.Errorf("%+v", low)
 	}
 	bus.Publish(model.DeployFinished{Service: 1, Deployment: 8, OK: true})
@@ -234,5 +245,52 @@ func TestTestSendsNowAndSaysWhetherItWorked(t *testing.T) {
 	a.Remove(ctx, 1)
 	if v, _ := a.Channels(ctx); len(v) != 1 {
 		t.Fatal("removed")
+	}
+}
+
+type memAudit struct {
+	mu      sync.Mutex
+	entries []model.AuditEntry
+}
+
+func (m *memAudit) Record(_ context.Context, e model.AuditEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries = append(m.entries, e)
+	return nil
+}
+func (m *memAudit) Recent(context.Context, time.Time, int) ([]model.AuditEntry, error) {
+	return nil, nil
+}
+func (m *memAudit) Prune(context.Context, time.Time) error { return nil }
+func (m *memAudit) count() int                             { m.mu.Lock(); defer m.mu.Unlock(); return len(m.entries) }
+
+func TestWhatHappensIsAlsoRecorded(t *testing.T) {
+	ch, dl, s, bus := &memChannels{}, &memDeliveries{}, &fakeSender{fail: map[string]error{}}, events.NewBus()
+	audit := &memAudit{}
+	a, run := NewAlerts(Parts{Channels: ch, Deliveries: dl, Sender: s, Services: fakeServices{}, Events: bus, Clock: clock{}, Audit: audit,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	c, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go run(c)
+	a.Add(ctx, model.ChannelInput{URL: url("https://hooks.example.com/naru")})
+
+	bus.Publish(model.DeployFinished{Service: 1, Deployment: 9, OK: true})
+	bus.Publish(model.ServiceDown{Service: 1, Name: "blog", Why: "crashed"})
+	bus.Publish(model.DiskLow{Free: 9 << 30, Total: 100 << 30})
+	waitFor(t, func() bool { return audit.count() == 3 })
+	time.Sleep(20 * time.Millisecond)
+	if s.count() != 2 {
+		t.Fatalf("a successful deploy is recorded, not sent: %d sent", s.count())
+	}
+	ok, down, disk := audit.entries[0], audit.entries[1], audit.entries[2]
+	if !ok.System || ok.Action != "deploy.ok" || ok.Target != "blog" || ok.Service != 1 || ok.Detail != "#9" || !ok.OK {
+		t.Fatalf("%+v", ok)
+	}
+	if down.Action != "service.down" || down.OK || down.Detail != "crashed" || down.Service != 1 {
+		t.Fatalf("%+v", down)
+	}
+	if disk.Action != "disk.low" || disk.Detail != "9.0 GB (9%)" {
+		t.Fatalf("%+v", disk)
 	}
 }

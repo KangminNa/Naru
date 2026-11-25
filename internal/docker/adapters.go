@@ -146,7 +146,7 @@ func (k Containers) One(ctx context.Context, name string) (model.ContainerState,
 	if err != nil {
 		return model.ContainerState{}, err
 	}
-	return model.ContainerState{Name: name, Running: in.Running, State: in.Status, ExitCode: in.ExitCode}, nil
+	return model.ContainerState{Name: name, Running: in.Running, State: in.Status, ExitCode: in.ExitCode, Restarts: in.Restarts, OOMKilled: in.OOMKilled}, nil
 }
 
 func (k Containers) Logs(ctx context.Context, name string, lines int) (string, error) {

@@ -250,10 +250,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 			key, status = "err.internal", http.StatusInternalServerError
 		}
 		s.d.Log.Warn("failed sign-in", "user", username, "from", ip)
+		s.auditLogin(r, username, false)
 		s.render(w, r, status, "login", view{Err: key, Data: loginScreen{Username: username}})
 		return
 	}
 	s.setSessionCookie(w, r, t)
+	s.auditLogin(r, username, true)
 	redirect(w, r, "/")
 }
 
@@ -288,6 +290,7 @@ type settingsScreen struct {
 	Deliveries  []model.Delivery
 	AlertError  string // 시험으로 보내지 못한 이유
 	AlertForm   alertForm
+	Audit       []auditRow // 관리자가 한 일 — 최근 것부터
 }
 
 type alertForm struct{ Name, URL string }
@@ -297,6 +300,12 @@ func (s *Server) settingsScreen(r *http.Request) settingsScreen {
 	d := settingsScreen{Domain: domain, Email: s.certEmail(r), FixedDomain: fixed, DataDir: s.d.DataDir, Cert: s.adminCert(r.Context())}
 	d.Channels, _ = s.d.Alerts.Channels(r.Context())
 	d.Deliveries, _ = s.d.Alerts.Deliveries(r.Context(), 10)
+	if s.d.Monitor != nil {
+		entries, _ := s.d.Monitor.Audit(r.Context(), 50)
+		for _, e := range entries {
+			d.Audit = append(d.Audit, auditRowOf(e))
+		}
+	}
 	return d
 }
 

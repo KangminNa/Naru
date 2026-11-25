@@ -147,6 +147,9 @@
 | `ServiceViewer` | 화면에 보여줄 서비스 모습(홈 카드·상세·배포 기록·로그)을 모은다. 비밀은 담지 않는다. 로그는 앱 출력과 받은 요청을 시간순으로 합친다 (M6-2) | `serviceViewer` |
 | `ContainerFinder` | Naru가 띄우지 않은, 이 서버의 다른 컨테이너를 찾는다 — 홈의 목록(compose 묶음별, 어느 외부 연결 서비스가 보내는지, 기본 bridge에만 있는지), 외부 연결 칸의 제안, 저장소로 옮길 때 채울 값(환경 변수는 이름만). **보기만 한다** | `containerFinder` |
 | `ServerStats` | 서버의 CPU·메모리·디스크를 알려준다 | `stats.ProcSampler` |
+| `MonitorViewer` | 서버 화면 — 기간(1시간·24시간·7일·30일)의 자원 기록을 칸으로 묶은 그래프, 그 기간에 일어난 일, 서비스별 사용·다시 시작 횟수 — 과 관리 기록을 모은다 | `monitorViewer` |
+| `MetricStore` | 서버·서비스 자원 사용 기록. 1분 값 2일, 1시간 값(평균·최고) 30일 | `store.Metrics` |
+| `AuditLog` | 기록 — 관리자가 한 일(로그인 성공·실패와 IP, 바꾼 것)과 Naru가 본 일(멈춤·배포·디스크·자원·다시 시작). 90일. 비밀 값은 담지 않는다 | `store.Audit` |
 
 ### I. 웹서버 설정 정하기 — `websettings` (M5)
 
@@ -330,7 +333,7 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `Commit` · `ImageID` · `ImageDetails` | 가져온 커밋 · Docker 이미지 ID · 받은 이미지의 ID와 열어둔 포트 |
 | `SiteFolder` | 정적 사이트 배포본 하나 (서비스 이름 + 배포 번호) |
 | `CodeSource` | 내려받을 코드 — 저장소·브랜치·토큰 |
-| `ContainerSpec` · `ContainerState` · `ContainerStates` | 띄울 컨테이너(앱 네트워크 말고 더 붙일 네트워크 포함) · 컨테이너 하나의 상태(이미지가 연 포트, 이미지 이름, compose 묶음, 붙은 네트워크, Naru 서비스 번호 포함) · 이름별 상태 (nil이면 Docker를 읽지 못함) |
+| `ContainerSpec` · `ContainerState` · `ContainerStates` | 띄울 컨테이너(앱 네트워크 말고 더 붙일 네트워크 포함) · 컨테이너 하나의 상태(이미지가 연 포트, 이미지 이름, compose 묶음, 붙은 네트워크, Naru 서비스 번호 포함. `One`은 Docker가 다시 시작한 횟수와 메모리 부족으로 죽었는지도) · 이름별 상태 (nil이면 Docker를 읽지 못함) |
 | `NetworkNames` | 앱 컨테이너를 더 붙일 Docker 네트워크 이름들 — 이름 모양만 받고 `bridge`·`host`·`none`은 거절, 8개까지. 그 네트워크의 DB 같은 컨테이너에 앱이 닿게 한다 |
 | `ContainerSeed` · `SeedEnv` | 컨테이너를 저장소 서비스로 옮길 때 화면에 채울 값(포트·볼륨·다른 네트워크·저장소 주소 짐작, 옮기지 않는 이름 있는 볼륨, 이 컨테이너로 보내는 외부 연결 서비스와 그 주소) · 환경 변수 이름 하나(이미지가 정한 것인지). **값은 없다** |
 | `ContainerDetails` | 도구가 읽은 컨테이너 하나 — 환경 변수(값 포함), 이미지가 정한 환경 변수, 볼륨, 출처 라벨. **`web`·`cli`는 이 타입을 쓸 수 없다** |
@@ -376,7 +379,10 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | 이름 | 무엇 |
 |---|---|
 | `WatchSnapshot` · `DownService` | 마지막으로 본 것 — 멈춘 서비스(왜), 웹서버·Docker에 닿는지, 찾은 문제, 서비스별 CPU·메모리, 본 시각 · 멈춘 서비스 하나 |
-| `ResourceUsage` | 컨테이너 하나의 CPU %(서버 전체가 100%)·메모리 사용량·제한 (제한이 없으면 서버 전체 메모리) |
+| `ResourceUsage` | 컨테이너 하나의 CPU %(서버 전체가 100%)·메모리 사용량·제한 (제한이 없으면 서버 전체 메모리)·받고 보낸 누적 바이트 |
+| `MetricPoint` · `MetricRange` | 서버 또는 서비스 하나의 한 때 — CPU(평균·최고)·메모리(평균·최고·전체)·디스크·웹서버 트래픽 · 서버 화면의 기간(1h·24h·7d·30d — 칸 크기가 정해져 있다) |
+| `MonitorView` · `ServiceMetrics` | 서버 화면 — 기간·칸마다 서버 값·서비스별 값·일어난 일 · 서비스 하나의 칸마다 값과 그 기간에 다시 시작한 횟수 |
+| `AuditEntry` | 기록 한 줄 — 때, Naru가 본 일인지, 누가·어디서(IP)·무엇을·어느 서비스에, 성공했는지, 덧붙임. 비밀 값은 없다 |
 | `Finding` · `FindingLevel` | 찾은 문제 하나 — 서비스, 문구 키와 끼울 값, 기술적인 이유, 고칠 포트 · 급함·주의·확인 |
 | `Alert` · `AlertLevel` | 보낼 알림 — 사건 이름, 문제·복구·알림, 제목, 내용, 서비스 이름 |
 | `AlertChannel` · `ChannelID` | 알림 주소 — 이름, 주소, 시크릿. **`web`·`cli`는 이 타입을 쓸 수 없다** (주소가 비밀) |
@@ -415,6 +421,8 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `ServiceDown` · `ServiceUp` | 컨테이너 서비스가 (두 번 연속) 멈췄을 때 · 다시 응답할 때 |
 | `WebServerDown` · `WebServerUp` · `DockerDown` · `DockerUp` | 웹서버·Docker에 (두 번 연속) 닿지 않을 때 · 다시 닿을 때 |
 | `CertificateEndingSoon` | 인증서가 곧 끝날 때 — 수명의 1/6 미만 (주소마다 하루 한 번) |
+| `ResourceHigh` · `ResourceOK` | 서버 메모리 90% 이상이 5분·CPU 90% 이상이 10분 이어질 때 · 메모리 85%·CPU 80% 아래로 돌아올 때 |
+| `ServiceRestarted` | Docker가 앱 컨테이너를 다시 시작했을 때 — 메모리 부족(OOM)이었는지, 종료 코드 (알림은 서비스마다 1시간에 한 번) |
 | `DiskLow` · `DiskOK` | 데이터 폴더가 있는 디스크의 남은 공간이 20%(주의)·10%(긴급) 아래로 내려갈 때(더 나빠질 때마다) · 다시 20% 이상일 때 |
 
 ---
@@ -813,6 +821,26 @@ type DomainMover interface {
 	Move(ctx context.Context, from, to model.ServiceID) (moved int, err error)
 }
 
+// MonitorViewer는 서버 화면(자원 기록 그래프·일어난 일·서비스별 사용)과 관리 기록을 모은다.
+type MonitorViewer interface {
+	Monitor(ctx context.Context, r model.MetricRange) (model.MonitorView, error)
+	Audit(ctx context.Context, n int) ([]model.AuditEntry, error) // 관리자가 한 일 — 최근 것부터
+}
+
+// MetricStore는 서버·서비스의 자원 사용을 남긴다 — 1분 값은 2일, 그 뒤로는 1시간 값(평균·최고)으로 30일.
+type MetricStore interface {
+	Add(ctx context.Context, at time.Time, points map[model.ServiceID]model.MetricPoint) error // 서비스 0은 서버
+	Range(ctx context.Context, from, to time.Time) (map[model.ServiceID][]model.MetricPoint, error)
+	Compact(ctx context.Context, now time.Time) error // 2일 지난 1분 값을 1시간 값으로, 30일 지난 것은 지운다
+}
+
+// AuditLog는 관리자가 한 일과 Naru가 본 일(멈춤·배포·디스크 …)을 남긴다 — 90일. 비밀 값은 담지 않는다.
+type AuditLog interface {
+	Record(ctx context.Context, e model.AuditEntry) error
+	Recent(ctx context.Context, since time.Time, n int) ([]model.AuditEntry, error) // 최근 것부터
+	Prune(ctx context.Context, before time.Time) error
+}
+
 // ServerStats는 서버의 CPU·메모리·디스크를 알려준다.
 type ServerStats interface {
 	Now() model.ServerSnapshot
@@ -999,10 +1027,11 @@ type RandomTokens interface {
 | `containerFinder` | ServiceReader · ContainerWatcher · ContainerInspector (+ 숨길 컨테이너 이름 — Naru 자신과 웹서버 — 과 앱 네트워크 이름은 만들 때 받는다) |
 | `serviceViewer` | ServiceReader · SecretStore · DeployHistoryReader · ContainerWatcher · KindLookup · AdminDomainSetting · Deployer · CertificateReader · Clock · WebSettingsStore · ContainerLogReader · AccessLogReader · HealthWatcher |
 | `webSettingsEditor` | ServiceReader · WebSettingsStore · SnippetCompiler · LoginHasher · WebServerSync |
-| `healthWatcher` | ServiceReader · KindLookup · ContainerWatcher · PortChecker · Deployer · WebServerSync · CertificateReader · AdminDomainSetting · Diagnoser · UsageReader · Clock · EventPublisher · ServerStats(디스크 남은 공간) |
+| `healthWatcher` | ServiceReader · KindLookup · ContainerWatcher · PortChecker · Deployer · WebServerSync · CertificateReader · AdminDomainSetting · Diagnoser · UsageReader · Clock · EventPublisher · ServerStats(디스크·CPU·메모리) · MetricStore(1분마다 남기고 1시간마다 정리) · AuditLog(90일 지난 것 지우기) (+ 웹서버 컨테이너 이름 — 트래픽) |
 | `diagnoser` | KindLookup · PortChecker · DNSChecker · AdminDomainSetting · CertificateReader · WebServerSync · Clock (+ `NARU_PUBLIC_IP` 값은 만들 때 받는다) |
-| `alerts` | ChannelStore · DeliveryLog · AlertSender · ServiceReader · EventSubscriber · Clock |
-| `web` | LoginManager · AccountManager · SetupKey · AdminDomainSetting · CertEmailSetting · SetupProgress · ServiceLauncher · ServiceEditor · ServiceViewer · ContainerFinder · Deployer · ServiceControl · HookReceiver · ServerStats · WebServerSync · DNSChecker · CertificateReader · Clock · WebSettingsEditor · NginxTranslator · AlertSettings |
+| `alerts` | ChannelStore · DeliveryLog · AlertSender · ServiceReader · EventSubscriber · Clock · AuditLog(본 일을 기록에도 남긴다 — 성공한 배포 포함) |
+| `monitorViewer` | MetricStore · AuditLog · ServiceReader · Clock |
+| `web` | LoginManager · AccountManager · SetupKey · AdminDomainSetting · CertEmailSetting · SetupProgress · ServiceLauncher · ServiceEditor · ServiceViewer · ContainerFinder · MonitorViewer · AuditLog(관리자가 한 일 — 바꾸는 요청이 성공했을 때, 로그인은 실패도) · Deployer · ServiceControl · HookReceiver · ServerStats · WebServerSync · DNSChecker · CertificateReader · Clock · WebSettingsEditor · NginxTranslator · AlertSettings |
 
 ---
 

@@ -274,7 +274,8 @@ func TestUsage(t *testing.T) {
 		}
 		w.Write([]byte(`{"cpu_stats":{"cpu_usage":{"total_usage":3500000000},"system_cpu_usage":120000000000,"online_cpus":4},
 			"precpu_stats":{"cpu_usage":{"total_usage":3000000000},"system_cpu_usage":116000000000},
-			"memory_stats":{"usage":157286400,"limit":8238469120,"stats":{"inactive_file":52428800}}}`))
+			"memory_stats":{"usage":157286400,"limit":8238469120,"stats":{"inactive_file":52428800}},
+			"networks":{"eth0":{"rx_bytes":1000,"tx_bytes":5000},"eth1":{"rx_bytes":24,"tx_bytes":6}}}`))
 	}))
 	u, err := NewContainers(New(sock)).Usage(context.Background(), "naru-blog-1")
 	if err != nil {
@@ -286,12 +287,25 @@ func TestUsage(t *testing.T) {
 	if u.MemUsed != 104857600 || u.MemLimit != 8238469120 {
 		t.Fatalf("file cache is not counted as used: %+v", u)
 	}
+	if u.NetIn != 1024 || u.NetOut != 5006 {
+		t.Fatalf("bytes in and out, all networks together: %+v", u)
+	}
 	if _, err := NewContainers(New(sock)).Usage(context.Background(), "nope"); err == nil {
 		t.Fatal("unknown container")
 	}
 }
 
 // 웹서버 컨테이너를 다른 네트워크에 붙이고 떼기 — 이미 붙어 있거나 이미 떨어져 있으면 그대로 괜찮다.
+func TestOneReadsRestartsAndOutOfMemory(t *testing.T) {
+	sock := fakeDocker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"RestartCount":3,"State":{"Running":true,"Status":"running","ExitCode":0,"OOMKilled":true}}`))
+	}))
+	st, err := NewContainers(New(sock)).One(context.Background(), "naru-blog-4")
+	if err != nil || st.Restarts != 3 || !st.OOMKilled || !st.Running {
+		t.Fatalf("%+v %v", st, err)
+	}
+}
+
 func TestInspectReadsEnvVolumesAndSource(t *testing.T) {
 	sock := fakeDocker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

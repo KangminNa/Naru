@@ -1480,6 +1480,86 @@ func TestAServiceCanJoinOtherNetworks(t *testing.T) {
 	}
 }
 
+// ── 서버 화면 · 관리 기록 ──────────────
+
+func TestServerPageAndAdminLog(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+
+	// 로그인 — 실패도 남는다 (적은 이름 그대로, 비밀번호는 남기지 않는다)
+	h.post("/logout", nil)
+	h.post("/login", url.Values{"username": {"admin"}, "password": {"wrong-password"}})
+	if code, _, _ := h.post("/login", url.Values{"username": {"admin"}, "password": {"longenough"}}); code != http.StatusSeeOther {
+		t.Fatal("signed in again")
+	}
+	_, _, page := h.get("/")
+	if !strings.Contains(page, `href="/server"`) {
+		t.Fatal("the menu has the server page")
+	}
+	if _, _, page := h.get("/server"); !strings.Contains(page, "아직 기록이 없어요") {
+		t.Fatal("nothing recorded yet")
+	}
+
+	h.post("/services/new", url.Values{"kind": {"image"}, "source": {"me/app"}})
+	h.app.wait()
+	h.post("/services/1/deploy", nil)
+	h.app.wait()
+	if code, _, _ := h.post("/services/1/settings", url.Values{"source": {"me/app"}, "port": {"99999"}}); code != http.StatusBadRequest {
+		t.Fatal("a refused change")
+	}
+	h.post("/services/1/settings", url.Values{"source": {"me/app"}, "env": {"SECRET_TOKEN=s3cr3t"}})
+	h.post("/services/new", url.Values{"kind": {"image"}, "source": {"me/old"}, "name": {"old"}})
+	h.app.wait()
+	h.post("/services/2/delete", url.Values{"confirm": {"old"}})
+	h.app.wait()
+
+	_, _, page = h.get("/settings")
+	audit := page[strings.Index(page, `id="audit"`):]
+	audit = audit[:strings.Index(audit, "</section>")]
+	for _, want := range []string{"로그인 실패", "로그인", "로그아웃", "app 서비스를 만들었어요", "app 배포를 시작했어요", "app 설정을 바꿨어요",
+		"old 서비스를 지웠어요", "<b>admin</b>", "127.0.0.1"} {
+		if !strings.Contains(audit, want) {
+			t.Errorf("the admin log is missing %q", want)
+		}
+	}
+	if strings.Contains(audit, "s3cr3t") || strings.Contains(audit, "SECRET_TOKEN") || strings.Contains(audit, "wrong-password") || strings.Contains(audit, "99999") {
+		t.Fatal("values and refused changes are not logged")
+	}
+	if strings.Count(audit, "app 설정을 바꿨어요") != 1 {
+		t.Fatal("only the change that went through")
+	}
+
+	// 서버 화면 — 기록이 있으면 그래프, 서비스별, 일어난 일(성공한 배포는 Naru가 본 일로)
+	now := time.Now()
+	m := store.NewMetrics(h.app.db)
+	for i := 0; i < 30; i++ {
+		m.Add(ctx, now.Add(-time.Duration(i)*time.Minute), map[model.ServiceID]model.MetricPoint{
+			0: {CPU: float64(10 + i), MemUsed: 2 << 30, MemTotal: 8 << 30, DiskUsed: 40 << 30, DiskTotal: 100 << 30, NetIn: uint64(1000 * (30 - i)), NetOut: uint64(9000 * (30 - i))},
+			1: {CPU: 2, MemUsed: 120 << 20, MemTotal: 8 << 30},
+		})
+	}
+	var server string
+	for i := 0; i < 100; i++ {
+		_, _, server = h.get("/server?range=1h")
+		if strings.Contains(server, "app 배포 #2 성공") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, want := range []string{`aria-current="true">1시간`, `<polyline class="ln cpu" points="0.0,`, `<polyline class="ln out" points="`,
+		`<a href="/services/1">app</a>`, "120.0 MB", "app 배포 #2 성공", "최고 39%"} {
+		if !strings.Contains(server, want) {
+			t.Errorf("the server page is missing %q", want)
+		}
+	}
+	if strings.Contains(server, "로그인 실패") {
+		t.Fatal("admin actions stay on the settings page")
+	}
+	if _, _, odd := h.get("/server?range=forever"); !strings.Contains(odd, `aria-current="true">24시간`) {
+		t.Fatal("an unknown period is a day")
+	}
+}
+
 // ── 로그 보관 · 찾기 · 받기 ──────────────
 
 func TestLogsOfEarlierDeploymentsAreKeptAndSearchable(t *testing.T) {

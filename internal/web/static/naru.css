@@ -326,3 +326,23 @@ fieldset.pick legend { padding: 0; font-size: 14px; font-weight: 600; margin-bot
 .logs-find .input { flex: 1; min-width: 180px; }
 .logs-find select.input { flex: 0 1 auto; min-width: 200px; }
 
+/* 서버 화면 — 그래프 (서버가 SVG로 그린다) */
+.charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 14px; margin-bottom: 8px; }
+.chart-card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; }
+.chart-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--text-2); flex-wrap: wrap; }
+.chart-now { display: block; font-size: 22px; font-weight: 600; margin: 2px 0 6px; }
+.chart-now small { font-size: 13px; color: var(--text-3); font-weight: 400; }
+svg.chart { display: block; width: 100%; height: 60px; }
+svg.spark { width: 60px; height: 16px; vertical-align: middle; }
+svg .ln { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.ln.cpu { stroke: #378ADD; } .ln.mem { stroke: #1D9E75; } .ln.disk { stroke: #BA7517; } .ln.in { stroke: #888780; } .ln.out { stroke: #7F77DD; }
+i.key { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin: 0 4px 0 8px; }
+i.key.in { background: #888780; } i.key.out { background: #7F77DD; }
+.svc-table { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-top: 12px; }
+.svc-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .8fr); gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); font-size: 13.5px; align-items: center; }
+.svc-row:first-child { border-top: 0; }
+.svc-row.head { background: var(--soft); color: var(--text-2); font-size: 12.5px; }
+.svc-row a { font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.bad-text { color: var(--bad); }
+.desc.small, .small { font-size: 12.5px; }
+

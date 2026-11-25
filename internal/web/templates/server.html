@@ -1,0 +1,59 @@
+{{define "root"}}{{template "app" .}}{{end}}
+{{define "title"}}{{t "server.heading"}}{{end}}
+{{define "content"}}
+{{$d := .Data}}
+<div class="hero row">
+  <div><h1>{{t "server.heading"}}</h1><p>{{t "server.sub"}}</p></div>
+  <div class="seg" role="group" aria-label="{{t "server.range"}}">{{range $d.Ranges}}<a href="/server?range={{.}}" {{if eq . $d.Range}}aria-current="true"{{end}}>{{t (print "range." .)}}</a>{{end}}</div>
+</div>
+{{if not $d.HasData}}<p class="flash warn">{{t "server.nodata"}}</p>{{end}}
+
+<div class="charts">
+  <div class="chart-card">
+    <div class="chart-head"><span>{{t "server.cpu"}} · {{t "home.cores" $d.Now.Cores}}</span>{{if $d.HasData}}<span>{{t "server.peak" (pct $d.CPU.Peak)}}</span>{{end}}</div>
+    <b class="chart-now">{{if $d.Now.HasCPU}}{{pct $d.Now.CPUPercent}}{{else}}—{{end}}</b>
+    <svg class="chart" viewBox="0 0 300 60" preserveAspectRatio="none" aria-hidden="true"><polyline class="ln cpu" points="{{line $d.CPU 300 60}}"/></svg>
+  </div>
+  <div class="chart-card">
+    <div class="chart-head"><span>{{t "server.memory"}}{{if $d.Now.HasMem}} · {{bytes $d.Now.MemTotal}}{{end}}</span>{{if $d.HasData}}<span>{{t "server.peak" (pct $d.Mem.Peak)}}</span>{{end}}</div>
+    <b class="chart-now">{{if $d.Now.HasMem}}{{bytes $d.Now.MemUsed}}{{else}}—{{end}}</b>
+    <svg class="chart" viewBox="0 0 300 60" preserveAspectRatio="none" aria-hidden="true"><polyline class="ln mem" points="{{line $d.Mem 300 60}}"/></svg>
+  </div>
+  <div class="chart-card">
+    <div class="chart-head"><span>{{t "server.disk"}}{{if $d.Now.HasDisk}} · {{bytes $d.Now.DiskTotal}}{{end}}</span></div>
+    <b class="chart-now">{{if $d.Now.HasDisk}}{{t "server.free" (bytes $d.Now.DiskFree)}}{{else}}—{{end}}</b>
+    <svg class="chart" viewBox="0 0 300 60" preserveAspectRatio="none" aria-hidden="true"><polyline class="ln disk" points="{{line $d.Disk 300 60}}"/></svg>
+  </div>
+  <div class="chart-card">
+    <div class="chart-head"><span>{{t "server.traffic"}}</span><span><i class="key in"></i>{{t "server.in"}} <i class="key out"></i>{{t "server.out"}}</span></div>
+    <b class="chart-now">{{bytes (u64 $d.NetOut.Sum)}} <small>/ {{bytes (u64 $d.NetIn.Sum)}}</small></b>
+    <svg class="chart" viewBox="0 0 300 60" preserveAspectRatio="none" aria-hidden="true"><polyline class="ln out" points="{{line $d.NetOut 300 60}}"/><polyline class="ln in" points="{{line $d.NetIn 300 60}}"/></svg>
+  </div>
+</div>
+<p class="desc small">{{t "server.keep"}}</p>
+
+<section class="section">
+  <h2>{{t "server.events"}}</h2>
+  {{if $d.Events}}
+  <ul class="rows">{{range $d.Events}}<li><span class="dot {{if .Tone}}{{.Tone}}{{else}}muted{{end}}"></span><span class="muted small mono">{{day .At}}</span> {{tv .Key .Args}}</li>{{end}}</ul>
+  {{else}}<p class="desc">{{t "server.noevents"}}</p>{{end}}
+</section>
+
+{{if $d.Services}}
+<section class="section">
+  <h2>{{t "server.services"}}</h2>
+  <div class="svc-table">
+    <div class="svc-row head"><span>{{t "server.col.service"}}</span><span>CPU</span><span>{{t "server.memory"}}</span><span>{{t "server.col.restarts"}}</span></div>
+    {{range $d.Services}}
+    <div class="svc-row">
+      <a href="/services/{{.ID}}">{{.Name}}</a>
+      <span>{{pct .CPU.Peak}} <svg class="spark" viewBox="0 0 60 16" preserveAspectRatio="none" aria-hidden="true"><polyline class="ln cpu" points="{{line .CPU 60 16}}"/></svg></span>
+      <span>{{bytes .MemNow}} <svg class="spark" viewBox="0 0 60 16" preserveAspectRatio="none" aria-hidden="true"><polyline class="ln mem" points="{{line .Mem 60 16}}"/></svg></span>
+      <span class="{{if .Restarts}}bad-text{{else}}muted{{end}}">{{.Restarts}}{{if .OOM}} · {{t "server.oom" .OOM}}{{end}}</span>
+    </div>
+    {{end}}
+  </div>
+  <p class="desc small">{{t "server.services.note"}}</p>
+</section>
+{{end}}
+{{end}}

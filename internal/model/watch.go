@@ -23,6 +23,8 @@ type ResourceUsage struct {
 	CPUPercent float64 // 서버 전체를 100%로 본다 (홈의 서버 CPU와 같은 눈금)
 	MemUsed    uint64  // 바이트 — 다시 읽을 수 있는 파일 캐시는 뺀다 (docker stats와 같다)
 	MemLimit   uint64  // 제한이 없으면 서버 전체 메모리
+	NetIn      uint64  // 받은 누적 바이트 (컨테이너가 시작된 뒤로)
+	NetOut     uint64  // 보낸 누적 바이트
 }
 
 // FindingLevel은 문제의 무게다 — 무거운 것부터 보인다.
@@ -186,8 +188,32 @@ type DiskLow struct {
 // DiskOK: 남은 공간이 다시 20% 이상이다.
 type DiskOK struct{ Free, Total uint64 }
 
-func (DiskLow) event() {}
-func (DiskOK) event()  {}
+// ResourceHigh: 서버 메모리 90% 이상이 5분, 또는 CPU 90% 이상이 10분 이어졌다.
+type ResourceHigh struct {
+	What    string // "cpu" · "memory"
+	Percent int
+}
+
+// ResourceOK: 다시 낮아졌다 (메모리 85%·CPU 80% 아래).
+type ResourceOK struct {
+	What    string
+	Percent int
+}
+
+// ServiceRestarted: Docker가 앱 컨테이너를 다시 시작했다 — 앱이 죽었다는 뜻이다.
+type ServiceRestarted struct {
+	Service  ServiceID
+	Name     string
+	OOM      bool // 메모리 부족으로 죽었다
+	ExitCode int
+	Count    int // 그 컨테이너가 다시 시작된 횟수
+}
+
+func (ResourceHigh) event()     {}
+func (ResourceOK) event()       {}
+func (ServiceRestarted) event() {}
+func (DiskLow) event()          {}
+func (DiskOK) event()           {}
 
 func (ServiceDown) event()           {}
 func (ServiceUp) event()             {}

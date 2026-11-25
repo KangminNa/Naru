@@ -24,21 +24,24 @@ import (
 
 // Parts는 지켜보기가 쓰는 것들이다.
 type Parts struct {
-	Services   contract.ServiceReader
-	Kinds      contract.KindLookup
-	Containers contract.ContainerWatcher
-	Ports      contract.PortChecker
-	Deployer   contract.Deployer
-	WebServer  contract.WebServerSync
-	Certs      contract.CertificateReader
-	Admin      contract.AdminDomainSetting
-	Diagnoser  contract.Diagnoser
-	Usage      contract.UsageReader
-	Stats      contract.ServerStats // 디스크 남은 공간 (없으면 보지 않는다)
-	Clock      contract.Clock
-	Events     contract.EventPublisher
-	Every      time.Duration // 0이면 30초
-	Log        *slog.Logger
+	Services      contract.ServiceReader
+	Kinds         contract.KindLookup
+	Containers    contract.ContainerWatcher
+	Ports         contract.PortChecker
+	Deployer      contract.Deployer
+	WebServer     contract.WebServerSync
+	Certs         contract.CertificateReader
+	Admin         contract.AdminDomainSetting
+	Diagnoser     contract.Diagnoser
+	Usage         contract.UsageReader
+	Stats         contract.ServerStats // 디스크·CPU·메모리 (없으면 보지 않는다)
+	Metrics       contract.MetricStore // 1분마다 남긴다 (없으면 남기지 않는다)
+	Audit         contract.AuditLog    // 90일 지난 기록을 지운다
+	WebServerName string               // 웹서버 컨테이너 이름 — 트래픽을 읽는다
+	Clock         contract.Clock
+	Events        contract.EventPublisher
+	Every         time.Duration // 0이면 30초
+	Log           *slog.Logger
 }
 
 type healthWatcher struct {
@@ -52,7 +55,11 @@ type healthWatcher struct {
 	docker     flag
 	webServer  flag
 	certWarned map[string]time.Time
-	disk       diskLevel                           // 마지막으로 본 디스크 상태
+	disk       diskLevel // 마지막으로 본 디스크 상태
+	cpu, mem   pressure  // 서버 CPU·메모리가 오래 높은가
+	restarts   map[model.ServiceID]*restartSeen
+	recordedAt time.Time                           // 마지막으로 남긴 때
+	tidiedAt   time.Time                           // 마지막으로 기록을 정리한 때
 	diagnosed  map[model.ServiceID][]model.Finding // 서비스마다 마지막 진단 — 배포 중에는 이것을 그대로 둔다
 }
 
@@ -100,7 +107,8 @@ func NewHealthWatcher(p Parts) (contract.HealthWatcher, func(context.Context)) {
 	if p.Every == 0 {
 		p.Every = 30 * time.Second
 	}
-	w := &healthWatcher{p: p, services: map[model.ServiceID]*flag{}, certWarned: map[string]time.Time{}, diagnosed: map[model.ServiceID][]model.Finding{}}
+	w := &healthWatcher{p: p, services: map[model.ServiceID]*flag{}, certWarned: map[string]time.Time{}, diagnosed: map[model.ServiceID][]model.Finding{},
+		restarts: map[model.ServiceID]*restartSeen{}}
 	w.snap = model.WatchSnapshot{DockerUp: true, WebServerUp: true}
 	return w, w.run
 }
@@ -167,7 +175,11 @@ func (w *healthWatcher) check(ctx context.Context) {
 	findings := w.diagnose(ctx, all, states)
 	findings = append(findings, w.warnCertificates(ctx, all, now)...)
 	findings = append(findings, w.watchDisk(first)...)
+	findings = append(findings, w.watchResources(now)...)
+	findings = append(findings, w.watchRestarts(ctx, all, states, now)...)
 	usage := w.readUsage(ctx, all, states)
+	w.record(ctx, now, usage)
+	w.tidy(ctx, now)
 	w.publishSnapshot(all, findings, usage, now)
 }
 
@@ -423,4 +435,170 @@ func (w *healthWatcher) watchDisk(first bool) []model.Finding {
 		f.Level = model.FindingUrgent
 	}
 	return []model.Finding{f}
+}
+
+// ── 자원 — 오래 높은가 ─────────────────────
+
+// pressure는 서버 CPU·메모리 하나를 본다 — high 이상이 hold 동안 이어지면 알리고, low 아래로 내려오면 돌아왔다고 알린다.
+type pressure struct {
+	since   time.Time // high 이상이 된 때 (아니면 0)
+	alerted bool
+}
+
+func (w *healthWatcher) track(p *pressure, what string, pct, high, low int, hold time.Duration, now time.Time) []model.Finding {
+	switch {
+	case pct >= high:
+		if p.since.IsZero() {
+			p.since = now
+		}
+		if !p.alerted && now.Sub(p.since) >= hold {
+			p.alerted = true
+			w.p.Events.Publish(model.ResourceHigh{What: what, Percent: pct})
+		}
+	case pct < low:
+		p.since = time.Time{}
+		if p.alerted {
+			p.alerted = false
+			w.p.Events.Publish(model.ResourceOK{What: what, Percent: pct})
+		}
+	default:
+		if !p.alerted {
+			p.since = time.Time{}
+		}
+	}
+	if !p.alerted {
+		return nil
+	}
+	return []model.Finding{{Key: "find." + what, Level: model.FindingWarning, Args: []string{strconv.Itoa(pct)}}}
+}
+
+// watchResources는 서버 메모리 90% 이상 5분, CPU 90% 이상 10분을 본다 (돌아옴: 85%·80% 아래).
+func (w *healthWatcher) watchResources(now time.Time) []model.Finding {
+	if w.p.Stats == nil {
+		return nil
+	}
+	snap := w.p.Stats.Now()
+	var out []model.Finding
+	if snap.HasMem && snap.MemTotal > 0 {
+		out = append(out, w.track(&w.mem, "memory", int(snap.MemUsed*100/snap.MemTotal), 90, 85, 5*time.Minute, now)...)
+	}
+	if snap.HasCPU {
+		out = append(out, w.track(&w.cpu, "cpu", int(snap.CPUPercent), 90, 80, 10*time.Minute, now)...)
+	}
+	return out
+}
+
+// ── 다시 시작 ─────────────────────────────
+
+// restartSeen은 서비스 컨테이너가 Docker에 의해 다시 시작된 횟수를 따라간다.
+type restartSeen struct {
+	container string
+	count     int
+	last      time.Time // 마지막으로 다시 시작된 것을 본 때
+	oom       bool
+	alerted   time.Time
+}
+
+const (
+	restartShown   = 24 * time.Hour // "주의가 필요한 것"에 이만큼 둔다
+	restartAlerted = time.Hour      // 알림은 서비스마다 이만큼에 한 번
+)
+
+// watchRestarts는 돌고 있는 앱 컨테이너의 다시 시작 횟수를 본다. 늘었으면 앱이 죽었다가 Docker가 다시 띄운 것이다.
+// 배포로 컨테이너가 바뀌면 새로 센다. 직접 멈춘 것·배포 중인 것은 보지 않는다.
+func (w *healthWatcher) watchRestarts(ctx context.Context, all []model.Service, states model.ContainerStates, now time.Time) []model.Finding {
+	if states == nil {
+		return nil
+	}
+	var out []model.Finding
+	for _, s := range all {
+		tools, ok := w.p.Kinds.Find(s.Kind)
+		name := s.Live.CurrentContainer()
+		if !ok || !tools.Destination.Find(s).Container || name == "" || s.Live.Stopped || w.p.Deployer.IsDeploying(s.ID) {
+			continue
+		}
+		if _, ok := states[name]; !ok {
+			continue
+		}
+		octx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		st, err := w.p.Containers.One(octx, name)
+		cancel()
+		if err != nil {
+			continue
+		}
+		r := w.restarts[s.ID]
+		if r == nil || r.container != name {
+			w.restarts[s.ID] = &restartSeen{container: name, count: st.Restarts}
+			continue
+		}
+		if st.Restarts > r.count {
+			r.count, r.last, r.oom = st.Restarts, now, st.OOMKilled
+			if now.Sub(r.alerted) >= restartAlerted {
+				r.alerted = now
+				w.p.Events.Publish(model.ServiceRestarted{Service: s.ID, Name: s.Name.String(), OOM: st.OOMKilled, ExitCode: st.ExitCode, Count: st.Restarts})
+			}
+		}
+		if !r.last.IsZero() && now.Sub(r.last) < restartShown {
+			f := model.Finding{Service: s.ID, Name: s.Name.String(), Key: "find.restarted", Level: model.FindingWarning,
+				Args: []string{r.last.Local().Format("01-02 15:04"), strconv.Itoa(r.count)}}
+			if r.oom {
+				f.Key = "find.oom"
+			}
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// ── 기록 ──────────────────────────────────
+
+// record는 1분마다 서버와 서비스의 자원 사용을 남긴다. 서버 트래픽은 웹서버 컨테이너가 받고 보낸 누적 바이트다.
+func (w *healthWatcher) record(ctx context.Context, now time.Time, usage map[model.ServiceID]model.ResourceUsage) {
+	if w.p.Metrics == nil || (!w.recordedAt.IsZero() && now.Sub(w.recordedAt) < time.Minute-5*time.Second) {
+		return
+	}
+	w.recordedAt = now
+	points := map[model.ServiceID]model.MetricPoint{}
+	if w.p.Stats != nil {
+		snap := w.p.Stats.Now()
+		p := model.MetricPoint{CPU: snap.CPUPercent, MemUsed: snap.MemUsed, MemTotal: snap.MemTotal}
+		if snap.HasDisk && snap.DiskTotal >= snap.DiskFree {
+			p.DiskUsed, p.DiskTotal = snap.DiskTotal-snap.DiskFree, snap.DiskTotal
+		}
+		if w.p.WebServerName != "" && w.p.Usage != nil {
+			uctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			if u, err := w.p.Usage.Usage(uctx, w.p.WebServerName); err == nil {
+				p.NetIn, p.NetOut = u.NetIn, u.NetOut
+			}
+			cancel()
+		}
+		points[0] = p
+	}
+	for id, u := range usage {
+		points[id] = model.MetricPoint{CPU: u.CPUPercent, MemUsed: u.MemUsed, MemTotal: u.MemLimit}
+	}
+	if err := w.p.Metrics.Add(ctx, now, points); err != nil {
+		w.p.Log.Warn("watch: record metrics", "err", err)
+	}
+}
+
+// auditKept는 기록을 남기는 기간이다.
+const auditKept = 90 * 24 * time.Hour
+
+// tidy는 1시간마다 자원 기록을 묶고 오래된 기록을 지운다.
+func (w *healthWatcher) tidy(ctx context.Context, now time.Time) {
+	if !w.tidiedAt.IsZero() && now.Sub(w.tidiedAt) < time.Hour {
+		return
+	}
+	w.tidiedAt = now
+	if w.p.Metrics != nil {
+		if err := w.p.Metrics.Compact(ctx, now); err != nil {
+			w.p.Log.Warn("watch: compact metrics", "err", err)
+		}
+	}
+	if w.p.Audit != nil {
+		if err := w.p.Audit.Prune(ctx, now.Add(-auditKept)); err != nil {
+			w.p.Log.Warn("watch: prune audit", "err", err)
+		}
+	}
 }

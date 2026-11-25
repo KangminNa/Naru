@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -26,13 +27,15 @@ func (f *fakeServices) Get(context.Context, model.ServiceID) (model.Service, err
 func (f *fakeServices) NameTaken(context.Context, model.ServiceName) bool { return false }
 
 type fakeContainers struct {
-	states model.ContainerStates
-	err    error
+	states   model.ContainerStates
+	err      error
+	restarts map[string]int
+	oom      map[string]bool
 }
 
 func (f *fakeContainers) All(context.Context) (model.ContainerStates, error) { return f.states, f.err }
-func (f *fakeContainers) One(context.Context, string) (model.ContainerState, error) {
-	return model.ContainerState{}, nil
+func (f *fakeContainers) One(_ context.Context, name string) (model.ContainerState, error) {
+	return model.ContainerState{Name: name, Restarts: f.restarts[name], OOMKilled: f.oom[name]}, nil
 }
 func (f *fakeContainers) Logs(context.Context, string, int) (string, error) { return "", nil }
 func (f *fakeContainers) BelongingTo(context.Context, model.ServiceID) ([]string, error) {
@@ -137,14 +140,35 @@ type rig struct {
 	dns        *fakeDNS
 	usage      *fakeUsage
 	stats      *fakeStats
+	metrics    *fakeMetrics
 }
 
 // fakeStats는 디스크 남은 공간만 정해 둔다.
-type fakeStats struct{ free, total uint64 }
+type fakeStats struct {
+	free, total uint64
+	cpu         float64
+	memUsed     uint64
+}
 
 func (s *fakeStats) Now() model.ServerSnapshot {
-	return model.ServerSnapshot{HasDisk: s.total > 0, DiskFree: s.free, DiskTotal: s.total}
+	return model.ServerSnapshot{HasDisk: s.total > 0, DiskFree: s.free, DiskTotal: s.total,
+		HasCPU: true, CPUPercent: s.cpu, HasMem: true, MemUsed: s.memUsed, MemTotal: 100}
 }
+
+// fakeMetrics는 남긴 것을 기억한다.
+type fakeMetrics struct {
+	added     []map[model.ServiceID]model.MetricPoint
+	compacted int
+}
+
+func (m *fakeMetrics) Add(_ context.Context, _ time.Time, p map[model.ServiceID]model.MetricPoint) error {
+	m.added = append(m.added, p)
+	return nil
+}
+func (m *fakeMetrics) Range(context.Context, time.Time, time.Time) (map[model.ServiceID][]model.MetricPoint, error) {
+	return nil, nil
+}
+func (m *fakeMetrics) Compact(context.Context, time.Time) error { m.compacted++; return nil }
 
 func name(s string) model.ServiceName { n, _ := model.ParseServiceName(s); return n }
 
@@ -165,12 +189,13 @@ func newRig() *rig {
 	}
 	r.dns = &fakeDNS{ips: map[string][]string{}}
 	r.usage = &fakeUsage{fails: map[string]bool{}}
-	r.stats = &fakeStats{free: 50 << 30, total: 100 << 30}
+	r.stats = &fakeStats{free: 50 << 30, total: 100 << 30, cpu: 10, memUsed: 40}
+	r.metrics = &fakeMetrics{}
 	lookup := kinds.NewLookup(kinds.Tools{})
 	w, _ := NewHealthWatcher(Parts{
 		Services: r.services, Kinds: lookup, Containers: r.containers, Ports: r.ports,
 		Deployer: r.deployer, WebServer: r.web, Certs: r.certs, Admin: &fakeAdmin{}, Clock: r.clock, Events: r.events,
-		Usage: r.usage, Stats: r.stats,
+		Usage: r.usage, Stats: r.stats, Metrics: r.metrics, WebServerName: "naru-caddy",
 		Diagnoser: NewDiagnoser(DiagnoserParts{Kinds: lookup, Ports: r.ports, DNS: r.dns, Admin: &fakeAdmin{}, Certs: r.certs, Clock: r.clock, PublicIP: "198.51.100.24",
 			WebServer: r.web, AppNetwork: "shelf-net"}),
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -342,8 +367,8 @@ func TestUsageOfRunningContainerServices(t *testing.T) {
 	if u, ok := snap.Usage[1]; !ok || u.CPUPercent != 12.5 || u.MemUsed != 100<<20 {
 		t.Fatalf("%+v", snap.Usage)
 	}
-	if len(snap.Usage) != 1 || len(r.usage.read) != 1 || r.usage.read[0] != "naru-blog-3" {
-		t.Fatalf("only running containers are read (not static sites or external services): %v", r.usage.read)
+	if len(snap.Usage) != 1 || len(r.usage.read) != 2 || r.usage.read[0] != "naru-blog-3" || r.usage.read[1] != "naru-caddy" {
+		t.Fatalf("only running app containers are read (not static sites or external services) — and the web server for traffic: %v", r.usage.read)
 	}
 
 	r.crash()
@@ -460,5 +485,136 @@ func TestDiskRunningLowIsAlertedAsItGetsWorse(t *testing.T) {
 	r2.stats.free = 5 << 30
 	if got := kinds(r2.check()); got != "" || len(r2.w.Snapshot().Findings) == 0 {
 		t.Fatalf("%q", got)
+	}
+}
+
+func names(evs []model.Event) string {
+	var s []string
+	for _, e := range evs {
+		switch x := e.(type) {
+		case model.ResourceHigh:
+			s = append(s, fmt.Sprintf("%s.high(%d)", x.What, x.Percent))
+		case model.ResourceOK:
+			s = append(s, fmt.Sprintf("%s.ok(%d)", x.What, x.Percent))
+		case model.ServiceRestarted:
+			s = append(s, fmt.Sprintf("restarted(%s,oom=%v,#%d)", x.Name, x.OOM, x.Count))
+		}
+	}
+	return strings.Join(s, " ")
+}
+
+func TestHighMemoryAndCPUMustLast(t *testing.T) {
+	r := newRig()
+	r.check()
+	r.stats.memUsed = 95
+	for i := 0; i < 10; i++ { // 30초마다 — 처음 본 때부터 4분 30초까지
+		if got := names(r.check()); got != "" {
+			t.Fatalf("not yet five minutes: %q", got)
+		}
+	}
+	if got := names(r.check()); got != "memory.high(95)" {
+		t.Fatalf("%q", got)
+	}
+	r.stats.memUsed = 87
+	if got := names(r.check()); got != "" {
+		t.Fatal("between 85 and 90 it stays high")
+	}
+	r.stats.memUsed = 80
+	if got := names(r.check()); got != "memory.ok(80)" {
+		t.Fatalf("%q", got)
+	}
+
+	// CPU는 10분 — 중간에 한 번이라도 내려가면 처음부터
+	r.stats.cpu = 99
+	for i := 0; i < 15; i++ {
+		r.check()
+	}
+	r.stats.cpu = 50
+	r.check()
+	r.stats.cpu = 99
+	for i := 0; i < 20; i++ {
+		if got := names(r.check()); got != "" {
+			t.Fatalf("check %d: %q", i, got)
+		}
+	}
+	if got := names(r.check()); got != "cpu.high(99)" {
+		t.Fatalf("%q", got)
+	}
+	found := false
+	for _, f := range r.w.Snapshot().Findings {
+		found = found || (f.Key == "find.cpu" && f.Args[0] == "99")
+	}
+	if !found {
+		t.Fatal("it is in what needs attention while high")
+	}
+}
+
+func TestRestartsAreNoticedOncePerHour(t *testing.T) {
+	r := newRig()
+	r.containers.restarts = map[string]int{"naru-blog-3": 2} // 이미 2번 — 처음 본 것은 기준
+	r.containers.oom = map[string]bool{}
+	if got := names(r.check()); got != "" {
+		t.Fatalf("%q", got)
+	}
+	r.containers.restarts["naru-blog-3"], r.containers.oom["naru-blog-3"] = 3, true
+	if got := names(r.check()); got != "restarted(blog,oom=true,#3)" {
+		t.Fatalf("%q", got)
+	}
+	var f model.Finding
+	for _, x := range r.w.Snapshot().Findings {
+		if x.Key == "find.oom" {
+			f = x
+		}
+	}
+	if f.Service != 1 || f.Args[1] != "3" {
+		t.Fatalf("%+v", r.w.Snapshot().Findings)
+	}
+	r.containers.restarts["naru-blog-3"], r.containers.oom["naru-blog-3"] = 4, false
+	if got := names(r.check()); got != "" {
+		t.Fatal("at most one alert an hour")
+	}
+	for i := 0; i < 120; i++ {
+		r.check()
+	}
+	r.containers.restarts["naru-blog-3"] = 5
+	if got := names(r.check()); got != "restarted(blog,oom=false,#5)" {
+		t.Fatalf("%q", got)
+	}
+	// 새 배포는 새로 센다
+	r.services.all[0].Live.Instance = "naru-blog-4"
+	r.containers.states["naru-blog-4"] = model.ContainerState{Name: "naru-blog-4", Running: true, State: "running"}
+	r.containers.restarts["naru-blog-4"] = 0
+	if got := names(r.check()); got != "" {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestUsageIsRecordedEveryMinuteAndTidiedHourly(t *testing.T) {
+	r := newRig()
+	r.check() // 30초
+	r.check() // 1분 — 남는다
+	r.check()
+	r.check()
+	if len(r.metrics.added) != 2 {
+		t.Fatalf("once a minute: %d", len(r.metrics.added))
+	}
+	p := r.metrics.added[0]
+	if p[0].DiskTotal != 100<<30 || p[0].DiskUsed != 50<<30 || p[0].CPU != 10 || p[0].MemUsed != 40 {
+		t.Fatalf("the server: %+v", p[0])
+	}
+	if _, ok := p[1]; !ok {
+		t.Fatalf("the running service: %+v", p)
+	}
+	if !slices.Contains(r.usage.read, "naru-caddy") {
+		t.Fatal("traffic is read from the web server container")
+	}
+	if r.metrics.compacted != 1 {
+		t.Fatal("tidied on the first check")
+	}
+	for i := 0; i < 120; i++ {
+		r.check()
+	}
+	if r.metrics.compacted != 2 {
+		t.Fatalf("then hourly: %d", r.metrics.compacted)
 	}
 }

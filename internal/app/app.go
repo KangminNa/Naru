@@ -350,9 +350,10 @@ func (a *App) assemble() error {
 	})
 
 	// J·K. 지켜보기 · 알리기 — 지켜보기가 이벤트를 내고, 알리기가 듣고 보낸다
+	metrics, auditLog := store.NewMetrics(db), store.NewAudit(db)
 	alertSettings, runAlerts := notify.NewAlerts(notify.Parts{
 		Channels: store.NewChannels(db), Deliveries: store.NewDeliveries(db), Sender: out.Alerts,
-		Services: serviceStore, Events: bus, Clock: out.Clock, Log: a.log,
+		Services: serviceStore, Events: bus, Clock: out.Clock, Audit: auditLog, Log: a.log,
 	})
 	diagnoser := watch.NewDiagnoser(watch.DiagnoserParts{
 		Kinds: lookup, Ports: out.Ports, DNS: out.DNS, Admin: adminDomain, Certs: out.Certs, Clock: out.Clock, PublicIP: cfg.PublicIP,
@@ -361,6 +362,7 @@ func (a *App) assemble() error {
 	watcher, runWatch := watch.NewHealthWatcher(watch.Parts{
 		Services: serviceStore, Kinds: lookup, Containers: out.Watcher, Ports: out.Ports, Deployer: deployer,
 		WebServer: sync, Certs: out.Certs, Admin: adminDomain, Diagnoser: diagnoser, Usage: out.Usage, Stats: out.Stats, Clock: out.Clock, Events: bus, Every: out.WatchEvery, Log: a.log,
+		Metrics: metrics, Audit: auditLog, WebServerName: cfg.CaddyContainer,
 	})
 	a.alerts, a.watch = runAlerts, runWatch
 
@@ -370,6 +372,7 @@ func (a *App) assemble() error {
 		Admin: adminDomain, Deployer: deployer, Certs: out.Certs, Clock: out.Clock, HTTPSPort: cfg.HTTPSPort, Web: webStore,
 		AppLogs: out.AppLogs, Access: out.Access, Watch: watcher, Archive: logArchive,
 	}, a.log)
+	monitor := views.NewMonitorViewer(views.MonitorParts{Metrics: metrics, Audit: auditLog, Services: serviceStore, Clock: out.Clock})
 	finder := views.NewContainerFinder(views.FinderParts{
 		Services: serviceStore, Containers: out.Watcher, Inspector: out.Inspect, Hide: []string{cfg.CaddyContainer, selfHost(cfg.SelfUpstream)},
 		AppNetwork: cfg.Network,
@@ -377,7 +380,7 @@ func (a *App) assemble() error {
 
 	srv, err := web.New(web.Deps{
 		Login: login, Accounts: a.Accounts, SetupKey: a.key, AdminDomain: adminDomain, CertEmail: certEmail, Setup: setup,
-		Launcher: launcher, Editor: editor, Viewer: viewer, Finder: finder, Deployer: deployer, Control: control, Hooks: hooks,
+		Launcher: launcher, Editor: editor, Viewer: viewer, Finder: finder, Monitor: monitor, Audit: auditLog, Deployer: deployer, Control: control, Hooks: hooks,
 		Stats: out.Stats, WebServer: sync, DNS: out.DNS, Certs: out.Certs, Clock: out.Clock, Log: a.log,
 		WebSettings: webSettings, Nginx: websettings.NginxReader{}, Alerts: alertSettings, DataDir: cfg.DataDir, Version: cfg.Version,
 	})

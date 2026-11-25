@@ -276,23 +276,28 @@ func (c *Client) remove(ctx context.Context, name string) error {
 }
 
 type Inspection struct {
-	Running  bool
-	Status   string
-	ExitCode int
+	Running   bool
+	Status    string
+	ExitCode  int
+	Restarts  int
+	OOMKilled bool
 }
 
 func (c *Client) inspect(ctx context.Context, name string) (Inspection, error) {
 	var raw struct {
-		State struct {
-			Running  bool
-			Status   string
-			ExitCode int
+		RestartCount int
+		State        struct {
+			Running   bool
+			Status    string
+			ExitCode  int
+			OOMKilled bool
 		}
 	}
 	if err := c.call(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/json", nil, &raw); err != nil {
 		return Inspection{}, err
 	}
-	return Inspection{Running: raw.State.Running, Status: raw.State.Status, ExitCode: raw.State.ExitCode}, nil
+	return Inspection{Running: raw.State.Running, Status: raw.State.Status, ExitCode: raw.State.ExitCode,
+		Restarts: raw.RestartCount, OOMKilled: raw.State.OOMKilled}, nil
 }
 
 // Details는 컨테이너의 환경 변수·볼륨·출처 라벨이다. 이미지를 읽지 못하면 이미지가 정한 환경 변수만 비어 있다.

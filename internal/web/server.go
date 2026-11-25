@@ -33,7 +33,7 @@ const (
 	sessionMaxAge = 7 * 24 * time.Hour
 )
 
-var pageNames = []string{"setup_token", "setup_account", "setup_domain", "setup_https", "setup_done", "login", "home", "service", "new_service", "deploy", "settings", "notfound", "logs"}
+var pageNames = []string{"setup_token", "setup_account", "setup_domain", "setup_https", "setup_done", "login", "home", "service", "new_service", "deploy", "settings", "notfound", "logs", "server"}
 
 // Deps는 화면이 쓰는 것들이다. 모두 인터페이스다 — 화면은 저장소도, Docker도, 웹서버도 직접 모른다.
 type Deps struct {
@@ -47,6 +47,8 @@ type Deps struct {
 	Editor      contract.ServiceEditor
 	Viewer      contract.ServiceViewer
 	Finder      contract.ContainerFinder
+	Monitor     contract.MonitorViewer
+	Audit       contract.AuditLog // 관리자가 한 일을 남긴다 (없으면 남기지 않는다)
 	Deployer    contract.Deployer
 	Control     contract.ServiceControl
 	Hooks       contract.HookReceiver
@@ -86,7 +88,7 @@ func New(d Deps) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) Handler() http.Handler { return securityHeaders(sameOrigin(s.mux)) }
+func (s *Server) Handler() http.Handler { return securityHeaders(sameOrigin(s.audited(s.mux))) }
 
 func (s *Server) routes() {
 	static, _ := fs.Sub(staticFS, "static")
@@ -109,6 +111,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /logout", s.logout)
 
 	s.mux.HandleFunc("GET /{$}", s.home)
+	s.mux.HandleFunc("GET /server", s.serverPage)
 	s.mux.HandleFunc("GET /services/new", s.newServicePage)
 	s.mux.HandleFunc("POST /services/new", s.createService)
 	s.mux.HandleFunc("GET /services/{id}", s.servicePage)
@@ -218,6 +221,8 @@ func funcsFor(lang string) template.FuncMap {
 		"bytes": model.HumanBytes,
 		"clock": func(t time.Time) string { return t.Local().Format("01-02 15:04:05") },
 		"day":   func(t time.Time) string { return t.Local().Format("01-02 15:04") },
+		"line":  chartLine,
+		"u64":   func(f float64) uint64 { return uint64(f) },
 		"ms": func(d time.Duration) string {
 			if d < time.Second {
 				return fmt.Sprintf("%dms", d.Milliseconds())

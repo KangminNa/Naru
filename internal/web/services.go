@@ -65,6 +65,10 @@ func findingOf(f model.Finding) finding {
 	switch f.Key {
 	case "find.crashed", "find.restarting", "find.noanswer":
 		out.Link, out.LinkKey = fmt.Sprintf("/services/%d/logs", f.Service), "find.logs"
+	case "find.restarted", "find.oom":
+		out.Link, out.LinkKey = fmt.Sprintf("/services/%d/logs", f.Service), "find.logs"
+	case "find.cpu", "find.memory", "find.disk":
+		out.Link, out.LinkKey = "/server", "find.server"
 	case "find.webhook":
 		out.Link, out.LinkKey = fmt.Sprintf("/services/%d#webhook", f.Service), "find.webhook.open"
 	}

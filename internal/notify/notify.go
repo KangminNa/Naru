@@ -20,6 +20,7 @@ type Parts struct {
 	Services   contract.ServiceReader // 배포 실패 알림에 서비스 이름을 쓴다
 	Events     contract.EventSubscriber
 	Clock      contract.Clock
+	Audit      contract.AuditLog // 본 일을 기록에도 남긴다 (없으면 남기지 않는다)
 	Log        *slog.Logger
 }
 
@@ -32,13 +33,9 @@ type alerts struct {
 func NewAlerts(p Parts) (contract.AlertSettings, func(context.Context)) {
 	a := &alerts{p: p, queue: make(chan model.Event, 100)}
 	p.Events.Subscribe(func(e model.Event) {
-		switch x := e.(type) {
+		switch e.(type) {
 		case model.ServiceDown, model.ServiceUp, model.WebServerDown, model.WebServerUp, model.DockerDown, model.DockerUp, model.CertificateEndingSoon,
-			model.DiskLow, model.DiskOK:
-		case model.DeployFinished:
-			if x.OK {
-				return
-			}
+			model.DiskLow, model.DiskOK, model.ResourceHigh, model.ResourceOK, model.ServiceRestarted, model.DeployFinished:
 		default:
 			return
 		}
@@ -58,6 +55,10 @@ func (a *alerts) run(ctx context.Context) {
 			return
 		case e := <-a.queue:
 			alert := a.describe(ctx, e)
+			a.record(ctx, e, alert)
+			if d, ok := e.(model.DeployFinished); ok && d.OK {
+				continue // 성공한 배포는 기록에만
+			}
 			channels, err := a.p.Channels.List(ctx)
 			if err != nil {
 				a.p.Log.Error("alert channels", "err", err)
@@ -67,6 +68,41 @@ func (a *alerts) run(ctx context.Context) {
 				a.send(ctx, ch, alert)
 			}
 		}
+	}
+}
+
+// record는 본 일을 기록에 남긴다 — 화면은 Action을 문구 키로, Target을 서비스 이름으로 쓴다.
+func (a *alerts) record(ctx context.Context, e model.Event, alert model.Alert) {
+	if a.p.Audit == nil {
+		return
+	}
+	entry := model.AuditEntry{At: a.p.Clock.Now(), System: true, Action: alert.Event, Target: alert.Service, OK: alert.Level != model.AlertProblem}
+	switch x := e.(type) {
+	case model.ServiceDown:
+		entry.Service, entry.Detail = x.Service, x.Why
+	case model.ServiceUp:
+		entry.Service = x.Service
+	case model.ServiceRestarted:
+		entry.Service, entry.Detail = x.Service, fmt.Sprintf("%d", x.Count)
+	case model.DeployFinished:
+		entry.Service, entry.Detail = x.Service, fmt.Sprintf("#%d", x.Deployment)
+	case model.WebServerDown:
+		entry.Detail = x.Why
+	case model.DockerDown:
+		entry.Detail = x.Why
+	case model.CertificateEndingSoon:
+		entry.Target = x.Domain
+	case model.DiskLow:
+		entry.Detail = fmt.Sprintf("%s (%d%%)", model.HumanBytes(x.Free), x.Free*100/max(x.Total, 1))
+	case model.DiskOK:
+		entry.Detail = fmt.Sprintf("%s (%d%%)", model.HumanBytes(x.Free), x.Free*100/max(x.Total, 1))
+	case model.ResourceHigh:
+		entry.Target, entry.Detail = x.What, fmt.Sprintf("%d%%", x.Percent)
+	case model.ResourceOK:
+		entry.Target, entry.Detail = x.What, fmt.Sprintf("%d%%", x.Percent)
+	}
+	if err := a.p.Audit.Record(ctx, entry); err != nil {
+		a.p.Log.Warn("audit", "err", err)
 	}
 }
 
@@ -96,6 +132,10 @@ func (a *alerts) describe(ctx context.Context, e model.Event) model.Alert {
 		if s, err := a.p.Services.Get(ctx, x.Service); err == nil {
 			name = s.Name.String()
 		}
+		if x.OK {
+			return model.Alert{Event: "deploy.ok", Level: model.AlertRecovery, Service: name,
+				Title: fmt.Sprintf("배포 #%d 성공: %s / Deployed #%d: %s", x.Deployment, name, x.Deployment, name)}
+		}
 		return model.Alert{Event: "deploy.failed", Level: model.AlertProblem, Service: name,
 			Title:  "배포 실패: " + name + " / Deploy failed: " + name,
 			Detail: fmt.Sprintf("배포 #%d이 끝나지 못했어요. 지금 돌던 버전은 그대로예요 / deployment #%d failed; the running version is untouched", x.Deployment, x.Deployment)}
@@ -121,6 +161,33 @@ func (a *alerts) describe(ctx context.Context, e model.Event) model.Alert {
 		return model.Alert{Event: "disk.low", Level: model.AlertProblem, Title: title,
 			Detail: "서버에서 docker system df로 무엇이 차지하는지 보세요 — 옛 이미지·빌드 캐시가 많으면 docker image prune · docker builder prune / " +
 				"run docker system df on the server to see what uses the space"}
+	case model.ResourceHigh:
+		what, whatEn, hold := "메모리", "memory", "5분"
+		if x.What == "cpu" {
+			what, whatEn, hold = "CPU", "CPU", "10분"
+		}
+		return model.Alert{Event: x.What + ".high", Level: model.AlertProblem,
+			Title:  fmt.Sprintf("서버 %s %d%% — %s 넘게 높아요 / Server %s at %d%% for a while", what, x.Percent, hold, whatEn, x.Percent),
+			Detail: "서버 화면에서 어느 서비스가 쓰는지 보세요 / see which service uses it on the server page"}
+	case model.ResourceOK:
+		what, whatEn := "메모리", "memory"
+		if x.What == "cpu" {
+			what, whatEn = "CPU", "CPU"
+		}
+		return model.Alert{Event: x.What + ".ok", Level: model.AlertRecovery,
+			Title: fmt.Sprintf("서버 %s가 다시 낮아졌어요 (%d%%) / Server %s back to %d%%", what, x.Percent, whatEn, x.Percent)}
+	case model.ServiceRestarted:
+		why, whyEn := "앱이 죽어서 Docker가 다시 시작했어요", "the app died and Docker restarted it"
+		if x.OOM {
+			why, whyEn = "메모리가 모자라 죽어서 Docker가 다시 시작했어요", "it ran out of memory and Docker restarted it"
+		}
+		event := "service.restarted"
+		if x.OOM {
+			event = "service.oom"
+		}
+		return model.Alert{Event: event, Level: model.AlertProblem, Service: x.Name,
+			Title:  "서비스가 다시 시작됐어요: " + x.Name + " / Service restarted: " + x.Name,
+			Detail: fmt.Sprintf("%s: %s (%d번째) — 로그 탭에서 직전 출력을 보세요 / %s (restart #%d)", x.Name, why, x.Count, whyEn, x.Count)}
 	case model.DiskOK:
 		left := fmt.Sprintf("%s (%d%%)", model.HumanBytes(x.Free), x.Free*100/max(x.Total, 1))
 		return model.Alert{Event: "disk.ok", Level: model.AlertRecovery, Title: "디스크 공간이 돌아왔어요: " + left + " 남음 / Disk space recovered: " + left + " free"}

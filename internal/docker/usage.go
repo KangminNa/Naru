@@ -26,6 +26,10 @@ func (c *Client) usage(ctx context.Context, name string) (model.ResourceUsage, e
 			Limit uint64            `json:"limit"`
 			Stats map[string]uint64 `json:"stats"`
 		} `json:"memory_stats"`
+		Networks map[string]struct {
+			RxBytes uint64 `json:"rx_bytes"`
+			TxBytes uint64 `json:"tx_bytes"`
+		} `json:"networks"`
 	}
 	if err := c.call(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/stats?stream=false", nil, &raw); err != nil {
 		return model.ResourceUsage{}, err
@@ -43,6 +47,10 @@ func (c *Client) usage(ctx context.Context, name string) (model.ResourceUsage, e
 	u.MemUsed, u.MemLimit = raw.Memory.Usage, raw.Memory.Limit
 	if cache < u.MemUsed {
 		u.MemUsed -= cache
+	}
+	for _, n := range raw.Networks {
+		u.NetIn += n.RxBytes
+		u.NetOut += n.TxBytes
 	}
 	return u, nil
 }

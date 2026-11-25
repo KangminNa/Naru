@@ -132,6 +132,10 @@ type ContainerState struct {
 	ExitCode int
 	Ports    []Port // 이미지가 연 포트 (EXPOSE) — 진단이 앱 포트 대신 응답하는 포트를 찾을 때
 
+	// One만 채운다 — Docker가 다시 시작한 횟수, 마지막으로 죽은 것이 메모리 부족이었는지
+	Restarts  int
+	OOMKilled bool
+
 	// 아래는 All이 채운다 (One은 채우지 않는다) — 다른 컨테이너 목록이 쓴다.
 	Image    string
 	Project  string          // compose 묶음 이름 (com.docker.compose.project) — 없으면 빈 값

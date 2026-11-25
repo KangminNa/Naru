@@ -398,6 +398,26 @@ type DomainMover interface {
 	Move(ctx context.Context, from, to model.ServiceID) (moved int, err error)
 }
 
+// MonitorViewer는 서버 화면(자원 기록 그래프·일어난 일·서비스별 사용)과 관리 기록을 모은다.
+type MonitorViewer interface {
+	Monitor(ctx context.Context, r model.MetricRange) (model.MonitorView, error)
+	Audit(ctx context.Context, n int) ([]model.AuditEntry, error) // 관리자가 한 일 — 최근 것부터
+}
+
+// MetricStore는 서버·서비스의 자원 사용을 남긴다 — 1분 값은 2일, 그 뒤로는 1시간 값(평균·최고)으로 30일.
+type MetricStore interface {
+	Add(ctx context.Context, at time.Time, points map[model.ServiceID]model.MetricPoint) error // 서비스 0은 서버
+	Range(ctx context.Context, from, to time.Time) (map[model.ServiceID][]model.MetricPoint, error)
+	Compact(ctx context.Context, now time.Time) error // 2일 지난 1분 값을 1시간 값으로, 30일 지난 것은 지운다
+}
+
+// AuditLog는 관리자가 한 일과 Naru가 본 일(멈춤·배포·디스크 …)을 남긴다 — 90일. 비밀 값은 담지 않는다.
+type AuditLog interface {
+	Record(ctx context.Context, e model.AuditEntry) error
+	Recent(ctx context.Context, since time.Time, n int) ([]model.AuditEntry, error) // 최근 것부터
+	Prune(ctx context.Context, before time.Time) error
+}
+
 // ServerStats는 서버의 CPU·메모리·디스크를 알려준다.
 type ServerStats interface {
 	Now() model.ServerSnapshot

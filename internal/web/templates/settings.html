@@ -80,6 +80,16 @@
   {{end}}
 </section>
 
+<section class="section" id="audit">
+  <h2>{{t "settings.audit"}}</h2>
+  <p class="desc">{{t "settings.audit.desc"}}</p>
+  {{if .Data.Audit}}
+  <ul class="rows audit">
+    {{range .Data.Audit}}<li><span class="dot {{if .OK}}muted{{else}}bad{{end}}"></span><span class="muted small mono">{{day .At}}</span> <b>{{.Who}}</b> · {{tv .Key .Args}} <span class="muted small mono">{{.IP}}</span></li>{{end}}
+  </ul>
+  {{else}}<p class="desc">{{t "settings.audit.empty"}}</p>{{end}}
+</section>
+
 <section class="section">
   <h2>{{t "nav.language"}}</h2>
   <div class="seg">

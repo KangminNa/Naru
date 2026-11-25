@@ -24,6 +24,7 @@
     <a class="logo" href="/">{{template "logo"}}<span class="word">Naru</span></a>
     <nav class="menu">
       <a href="/" {{if eq .Nav "home"}}aria-current="page"{{end}}>{{t "nav.services"}}</a>
+      <a href="/server" {{if eq .Nav "server"}}aria-current="page"{{end}}>{{t "nav.server"}}</a>
       <a href="/settings" {{if eq .Nav "settings"}}aria-current="page"{{end}}>{{t "nav.settings"}}</a>
     </nav>
     <span class="spacer"></span>

@@ -642,3 +642,83 @@ func must(s model.Service, err error) model.Service {
 	}
 	return s
 }
+
+func TestMetricsAreKeptByTheMinuteThenByTheHour(t *testing.T) {
+	db := open(t, t.TempDir())
+	m := NewMetrics(db)
+	start := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 120; i++ { // 10시부터 2시간, 1분마다
+		at := start.Add(time.Duration(i) * time.Minute)
+		cpu := 10.0
+		if i == 30 {
+			cpu = 90
+		}
+		err := m.Add(ctx, at, map[model.ServiceID]model.MetricPoint{
+			0: {CPU: cpu, MemUsed: 4 << 30, MemTotal: 8 << 30, DiskUsed: 50 << 30, DiskTotal: 100 << 30, NetIn: uint64(i) * 1000, NetOut: uint64(i) * 9000},
+			7: {CPU: 1, MemUsed: uint64(100+i) << 20, MemTotal: 8 << 30},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := m.Range(ctx, start, start.Add(2*time.Hour))
+	if err != nil || len(got[0]) != 120 || len(got[7]) != 120 || got[0][30].CPU != 90 || got[0][119].NetOut != 119*9000 {
+		t.Fatalf("%d %d %v", len(got[0]), len(got[7]), err)
+	}
+
+	// 2일 뒤: 끝난 시간들은 1시간 값으로 묶인다 (평균·최고, 누적 바이트는 마지막)
+	if err := m.Compact(ctx, start.Add(50*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = m.Range(ctx, start, start.Add(2*time.Hour))
+	if len(got[0]) != 2 || len(got[7]) != 2 {
+		t.Fatalf("one point per hour: %d %d", len(got[0]), len(got[7]))
+	}
+	h := got[0][0]
+	if !h.At.Equal(start) || h.CPU < 11.3 || h.CPU > 11.4 || h.CPUMax != 90 || h.MemTotal != 8<<30 || h.DiskUsed != 50<<30 || h.NetOut != 59*9000 {
+		t.Fatalf("average, peak and the last counter: %+v", h)
+	}
+	if svc := got[7][1]; svc.MemMax != 219<<20 || svc.MemUsed != 189<<20+512<<10 {
+		t.Fatalf("%+v", svc)
+	}
+	if err := m.Compact(ctx, start.Add(51*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := m.Range(ctx, start, start.Add(2*time.Hour)); len(again[0]) != 2 {
+		t.Fatal("an hour is never compacted twice")
+	}
+	// 30일 뒤에는 남지 않는다
+	m.Compact(ctx, start.Add(31*24*time.Hour))
+	if gone, _ := m.Range(ctx, start, start.Add(2*time.Hour)); len(gone) != 0 {
+		t.Fatalf("%v", gone)
+	}
+}
+
+func TestAuditKeepsWhatHappened(t *testing.T) {
+	db := open(t, t.TempDir())
+	a := NewAudit(db)
+	at := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	a.Record(ctx, model.AuditEntry{At: at, Who: "lab", IP: "203.0.113.9", Action: "login", OK: true})
+	a.Record(ctx, model.AuditEntry{At: at.Add(time.Minute), Who: strings.Repeat("x", 300), IP: "198.51.100.7", Action: "login", OK: false})
+	a.Record(ctx, model.AuditEntry{At: at.Add(2 * time.Minute), System: true, Action: "service.down", Target: "blog", Service: 4, OK: false, Detail: "crashed"})
+	got, err := a.Recent(ctx, at, 10)
+	if err != nil || len(got) != 3 {
+		t.Fatalf("%v %v", got, err)
+	}
+	if !got[0].System || got[0].Service != 4 || got[0].Detail != "crashed" || got[0].OK || got[2].Who != "lab" || !got[2].OK {
+		t.Fatalf("newest first: %+v", got)
+	}
+	if len(got[1].Who) != 64 {
+		t.Fatalf("what a stranger typed is cut: %d", len(got[1].Who))
+	}
+	if few, _ := a.Recent(ctx, at.Add(90*time.Second), 10); len(few) != 1 {
+		t.Fatal("since")
+	}
+	a.Prune(ctx, at.Add(90*time.Second))
+	if left, _ := a.Recent(ctx, at, 10); len(left) != 1 {
+		t.Fatal("pruned")
+	}
+	if cut("가나다", 4) != "가" {
+		t.Fatal("never cut in the middle of a character")
+	}
+}

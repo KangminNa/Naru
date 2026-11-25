@@ -29,6 +29,7 @@ type Parts struct {
 	AppLogs    contract.ContainerLogReader
 	Access     contract.AccessLogReader
 	Watch      contract.HealthWatcher // 지켜보기가 찾은 문제 — 여기서는 읽기만 한다
+	Archive    contract.LogArchive    // 보관된 지난 배포의 앱 출력 (없으면 지난 배포를 고를 수 없다)
 	HTTPSPort  int                    // 바깥에서 본 HTTPS 포트 — 443이 아니면 웹훅 주소에 붙인다 (로컬 개발)
 }
 
@@ -207,10 +208,13 @@ func (v serviceViewer) webView(ctx context.Context, s model.Service) (model.WebS
 }
 
 // logLines만큼 로그 화면에 보여준다.
-const logLines = 200
+const (
+	logLines    = 200  // 화면에 보이는 줄
+	searchLines = 5000 // 찾거나 받을 때 읽는 줄
+)
 
 // Logs는 앱 출력과 받은 요청을 시간순으로 합친다. 한쪽을 못 읽어도 다른 쪽은 보여준다.
-func (v serviceViewer) Logs(ctx context.Context, id model.ServiceID, f model.LogFilter) (model.LogsView, error) {
+func (v serviceViewer) Logs(ctx context.Context, id model.ServiceID, q model.LogQuery) (model.LogsView, error) {
 	s, err := v.p.Services.Get(ctx, id)
 	if err != nil {
 		return model.LogsView{}, err
@@ -219,33 +223,65 @@ func (v serviceViewer) Logs(ctx context.Context, id model.ServiceID, f model.Log
 	if !ok {
 		return model.LogsView{}, model.ErrNotFound
 	}
-	view := model.LogsView{Service: s, Filter: f, HasApp: tools.Destination.Find(s).Container, HasRequests: len(s.Domains) > 0}
+	view := model.LogsView{Service: s, Filter: q.Show, Query: q.Text, Live: s.Live.LiveDeployment(),
+		HasApp: tools.Destination.Find(s).Container, HasRequests: len(s.Domains) > 0}
+	if view.HasApp && v.p.Archive != nil {
+		view.Archives, _ = v.p.Archive.List(s.Name)
+	}
+	// 찾거나 받을 때는 더 많은 줄에서 — 화면에는 맞는 것의 마지막 200줄
+	read, show := logLines, logLines
+	if q.Text != "" || q.Download {
+		read = searchLines
+	}
+	if q.Download {
+		show = searchLines
+	}
 	var lines []model.LogLine
-	if view.HasApp && f != model.LogsRequests && s.Live.CurrentContainer() != "" {
+	archived := q.Deployment != 0 && q.Deployment != view.Live
+	switch {
+	case archived:
+		// 지난 배포 — 보관한 앱 출력만 (요청 기록은 배포와 묶이지 않는다)
+		view.Deployment, view.HasRequests = q.Deployment, false
+		if v.p.Archive == nil {
+			view.AppError = model.ErrNotFound.Error()
+			break
+		}
+		app, err := v.p.Archive.Read(s.Name, q.Deployment)
+		if err != nil {
+			view.AppError = err.Error()
+		}
+		lines = append(lines, app...)
+	case view.HasApp && q.Show != model.LogsRequests && s.Live.CurrentContainer() != "":
 		lctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		app, err := v.p.AppLogs.Recent(lctx, s.Live.CurrentContainer(), logLines)
+		app, err := v.p.AppLogs.Recent(lctx, s.Live.CurrentContainer(), read)
 		cancel()
 		if err != nil {
 			view.AppError = err.Error()
 		}
 		lines = append(lines, app...)
 	}
-	if view.HasRequests && f != model.LogsApp {
+	if !archived && view.HasRequests && q.Show != model.LogsApp {
 		var hosts []string
 		for _, d := range s.Domains {
 			hosts = append(hosts, d.Domain.String())
 		}
-		reqs, err := v.p.Access.Recent(ctx, hosts, logLines)
+		reqs, err := v.p.Access.Recent(ctx, hosts, read)
 		if err != nil {
 			view.RequestError = err.Error()
 		}
 		lines = append(lines, reqs...)
 	}
-	sort.SliceStable(lines, func(i, j int) bool { return lines[i].At.Before(lines[j].At) })
-	if len(lines) > logLines {
-		lines = lines[len(lines)-logLines:]
+	matched := lines[:0]
+	for _, l := range lines {
+		if q.Matches(l) {
+			matched = append(matched, l)
+		}
 	}
-	view.Lines = lines
+	sort.SliceStable(matched, func(i, j int) bool { return matched[i].At.Before(matched[j].At) })
+	if len(matched) > show {
+		matched = matched[len(matched)-show:]
+	}
+	view.Lines = matched
 	return view, nil
 }
 

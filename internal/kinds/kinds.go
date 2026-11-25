@@ -26,6 +26,8 @@ type Tools struct {
 	Watcher    contract.ContainerWatcher
 	Ports      contract.PortChecker
 	Files      contract.SiteFiles
+	AppLogs    contract.ContainerLogReader // 옛 컨테이너를 지우기 전에 앱 출력을 읽는다
+	Archive    contract.LogArchive         // 그것을 남긴다 (없으면 남기지 않는다)
 
 	Network    string // 앱 컨테이너가 붙는 네트워크
 	SitesShown string // 웹서버 컨테이너에서 본 정적 사이트 폴더 (기본 /srv/sites)

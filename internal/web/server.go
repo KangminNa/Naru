@@ -125,6 +125,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /services/{id}/web/nginx", s.importNginx)
 	s.mux.HandleFunc("GET /services/{id}/deploys/{did}", s.deployPage)
 	s.mux.HandleFunc("GET /services/{id}/logs", s.logsPage)
+	s.mux.HandleFunc("GET /services/{id}/logs.txt", s.logsText)
 	s.mux.HandleFunc("POST /hooks/{id}", s.webhook)
 	s.mux.HandleFunc("GET /settings", s.settingsPage)
 	s.mux.HandleFunc("POST /settings/password", s.changePassword)
@@ -214,8 +215,9 @@ func funcsFor(lang string) template.FuncMap {
 			}
 			return "manual"
 		},
-		"bytes": humanBytes,
+		"bytes": model.HumanBytes,
 		"clock": func(t time.Time) string { return t.Local().Format("01-02 15:04:05") },
+		"day":   func(t time.Time) string { return t.Local().Format("01-02 15:04") },
 		"ms": func(d time.Duration) string {
 			if d < time.Second {
 				return fmt.Sprintf("%dms", d.Milliseconds())
@@ -229,19 +231,6 @@ func funcsFor(lang string) template.FuncMap {
 			return t.Format("Jan 2")
 		},
 	}
-}
-
-func humanBytes(n uint64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := uint64(unit), 0
-	for m := n / unit; m >= unit && exp < 4; m /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTP"[exp])
 }
 
 // ── 요청에서 읽는 것들 ───────────────────────

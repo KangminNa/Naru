@@ -177,6 +177,18 @@ type CertificateEndingSoon struct {
 	NotAfter time.Time
 }
 
+// DiskLow: 데이터 폴더가 있는 디스크의 남은 공간이 20%(주의)·10%(긴급) 아래로 내려갔다 — 더 나빠질 때마다.
+type DiskLow struct {
+	Free, Total uint64
+	Urgent      bool
+}
+
+// DiskOK: 남은 공간이 다시 20% 이상이다.
+type DiskOK struct{ Free, Total uint64 }
+
+func (DiskLow) event() {}
+func (DiskOK) event()  {}
+
 func (ServiceDown) event()           {}
 func (ServiceUp) event()             {}
 func (WebServerDown) event()         {}

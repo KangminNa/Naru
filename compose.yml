@@ -14,6 +14,9 @@ services:
     image: caddy:2.11.9             # 운영(deploy/docker/compose.yml)과 같은 버전 — 올릴 때 함께 올린다
     container_name: naru-caddy        # shelf- 로 시작하면 안 된다 (v1이 앱으로 오해한다)
     restart: unless-stopped
+    logging:                                        # 로그를 끝없이 쌓지 않는다 (Docker 기본값은 제한 없음)
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
     command: caddy run --resume --config /etc/caddy/bootstrap.json
     ports:
       # 운영에서는 "80:80", "443:443", "443:443/udp"
@@ -35,6 +38,9 @@ services:
       dockerfile: Dockerfile
     container_name: naru
     restart: unless-stopped
+    logging:                                        # 로그를 끝없이 쌓지 않는다 (Docker 기본값은 제한 없음)
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
     environment:
       - NARU_TLS=internal                            # 로컬: 공개 CA에 요청하지 않는다
       - NARU_HTTPS_PORT=8443                         # 로컬은 HTTPS를 8443으로 열었다 — HTTP에서 넘길 때 이 포트로

@@ -150,6 +150,11 @@ func (f *fakeDocker) Logs(context.Context, string, int) (string, error) {
 	return "Error: Cannot find module 'express'\n", nil
 }
 
+// Recent는 그 컨테이너가 찍은 줄인 척한다 (ContainerLogReader).
+func (f *fakeDocker) Recent(_ context.Context, name string, n int) ([]model.LogLine, error) {
+	return []model.LogLine{{At: time.Unix(1795000000, 0), Source: model.LogApp, Stream: "stdout", Text: name + " says hi"}}, nil
+}
+
 func (f *fakeDocker) BelongingTo(_ context.Context, id model.ServiceID) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -230,6 +235,7 @@ type rig struct {
 	sites    string
 	changes  int
 	sync     *fakeSync
+	logs     files.LogArchives
 }
 
 func newRig(t *testing.T) *rig {
@@ -250,11 +256,13 @@ func newRig(t *testing.T) *rig {
 	})
 	r.sync = &fakeSync{docker: r.docker}
 	siteFiles := files.NewSiteFolders(r.sites)
+	r.logs = files.NewLogArchives(filepath.Join(dir, "logs"))
 	secrets := store.NewSecrets(db)
 	lookup := kinds.NewLookup(kinds.Tools{
 		Work: files.NewTempFolders(filepath.Join(dir, "work")), Code: r.git, Secrets: secrets,
 		Dockerfile: files.DockerfileReader{}, Packer: files.TarPacker{}, Builder: r.docker, Puller: r.docker, Images: r.docker,
 		Starter: r.docker, Remover: r.docker, Switch: r.docker, Watcher: r.docker, Ports: r.docker, Files: siteFiles,
+		AppLogs: r.docker, Archive: r.logs,
 		Network: "naru-net", ReadyTimeout: 300 * time.Millisecond, PollEvery: 10 * time.Millisecond,
 	})
 	lock := NewMemoryDeployLock()
@@ -265,7 +273,7 @@ func newRig(t *testing.T) *rig {
 	})
 	r.control = NewServiceControl(ControlParts{
 		Services: r.services, Store: r.services, Live: store.NewLiveStates(db), Lock: lock, Switch: r.docker, Remover: r.docker,
-		Watcher: r.docker, Images: r.docker, Files: siteFiles, Past: r.history, Events: bus,
+		Watcher: r.docker, Images: r.docker, Files: siteFiles, Past: r.history, Events: bus, Logs: r.logs,
 	})
 	return r
 }
@@ -342,6 +350,14 @@ func TestRedeployReplacesOnlyAfterTheNewOneAnswers(t *testing.T) {
 	names := r.docker.names()
 	if len(names) != 1 || names[0] != fmt.Sprintf("naru-whoami-%d", second.ID) {
 		t.Fatalf("only the new container remains: %v (first was %d)", names, first.ID)
+	}
+	// 내린 옛 컨테이너의 앱 출력은 남는다 — Docker는 컨테이너와 함께 지운다
+	kept, err := r.logs.Read(name("whoami"), first.ID)
+	if err != nil || len(kept) != 1 || kept[0].Text != fmt.Sprintf("naru-whoami-%d says hi", first.ID) {
+		t.Fatalf("%+v %v", kept, err)
+	}
+	if !strings.Contains(second.Log, "앱 출력 1줄을 보관했어요") {
+		t.Fatalf("%s", second.Log)
 	}
 }
 
@@ -588,6 +604,10 @@ func TestRemoveDeletesEverything(t *testing.T) {
 	r.docker.images["me/app"] = model.ImageDetails{ID: "sha256:v", Ports: []model.Port{80}}
 	id := r.create(model.NewService{Name: name("app"), Kind: model.KindImage, Source: "me/app"}, "")
 	r.deploy(id)
+	r.deploy(id)
+	if l, _ := r.logs.List(name("app")); len(l) != 1 {
+		t.Fatalf("the first container's output was kept: %v", l)
+	}
 	if err := r.control.Remove(ctx, id); err != nil {
 		t.Fatal(err)
 	}
@@ -596,6 +616,9 @@ func TestRemoveDeletesEverything(t *testing.T) {
 	}
 	if _, err := r.services.Get(ctx, id); !errors.Is(err, model.ErrNotFound) {
 		t.Fatal("the service is gone")
+	}
+	if l, _ := r.logs.List(name("app")); len(l) != 0 {
+		t.Fatal("and its kept output")
 	}
 }
 

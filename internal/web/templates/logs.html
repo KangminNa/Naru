@@ -1,21 +1,36 @@
 {{define "root"}}{{template "app" .}}{{end}}
 {{define "title"}}{{t "logs.heading"}} · {{.Data.Service.Name}}{{end}}
 {{define "content"}}
-{{$s := .Data.Service}}{{$f := print .Data.Filter}}
+{{$s := .Data.Service}}{{$f := print .Data.Filter}}{{$d := .Data}}
 <a class="back" href="/services/{{$s.ID}}">← {{$s.Name}}</a>
 <div class="detail-head">
   <div><h1>{{t "logs.heading"}}</h1><div class="sub"><span>{{t "logs.note"}}</span></div></div>
-  <div class="head-actions"><a class="btn" href="/services/{{$s.ID}}/logs?show={{$f}}">{{t "logs.refresh"}}</a></div>
+  <div class="head-actions">
+    <a class="btn" href="/services/{{$s.ID}}/logs.txt?show={{$f}}&amp;deploy={{$d.Deployment}}&amp;q={{$d.Query}}">{{t "logs.download"}}</a>
+    <a class="btn" href="/services/{{$s.ID}}/logs?show={{$f}}&amp;deploy={{$d.Deployment}}&amp;q={{$d.Query}}">{{t "logs.refresh"}}</a>
+  </div>
 </div>
+<form class="logs-find" method="get" action="/services/{{$s.ID}}/logs">
+  <input type="hidden" name="show" value="{{$f}}">
+  {{if $d.Archives}}
+  <select class="input" name="deploy" aria-label="{{t "logs.deploy"}}">
+    <option value="">{{if $d.Live}}{{t "logs.deploy.live" $d.Live}}{{else}}{{t "logs.deploy.now"}}{{end}}</option>
+    {{range $d.Archives}}<option value="{{.Deployment}}" {{if eq .Deployment $d.Deployment}}selected{{end}}>{{t "logs.deploy.kept" .Deployment (day .At)}}</option>{{end}}
+  </select>
+  {{end}}
+  <input class="input" name="q" value="{{$d.Query}}" placeholder="{{t "logs.find.placeholder"}}" aria-label="{{t "logs.find"}}">
+  <button class="btn" type="submit">{{t "logs.find"}}</button>
+</form>
+{{if $d.Deployment}}<p class="flash warn">{{t "logs.kept.note" $d.Deployment}}</p>{{end}}
 <div class="seg">
-  <a href="/services/{{$s.ID}}/logs?show=all" {{if eq $f "all"}}aria-current="true"{{end}}>{{t "logs.all"}}</a>
-  {{if .Data.HasApp}}<a href="/services/{{$s.ID}}/logs?show=app" {{if eq $f "app"}}aria-current="true"{{end}}>{{t "logs.app"}}</a>{{end}}
-  {{if .Data.HasRequests}}<a href="/services/{{$s.ID}}/logs?show=request" {{if eq $f "request"}}aria-current="true"{{end}}>{{t "logs.requests"}}</a>{{end}}
+  <a href="/services/{{$s.ID}}/logs?show=all&amp;deploy={{$d.Deployment}}&amp;q={{$d.Query}}" {{if eq $f "all"}}aria-current="true"{{end}}>{{t "logs.all"}}</a>
+  {{if .Data.HasApp}}<a href="/services/{{$s.ID}}/logs?show=app&amp;deploy={{$d.Deployment}}&amp;q={{$d.Query}}" {{if eq $f "app"}}aria-current="true"{{end}}>{{t "logs.app"}}</a>{{end}}
+  {{if .Data.HasRequests}}<a href="/services/{{$s.ID}}/logs?show=request&amp;q={{$d.Query}}" {{if eq $f "request"}}aria-current="true"{{end}}>{{t "logs.requests"}}</a>{{end}}
 </div>
 {{with .Data.AppError}}<p class="flash bad">{{t "logs.apperror"}} <code>{{.}}</code></p>{{end}}
 {{with .Data.RequestError}}<p class="flash bad">{{t "logs.requesterror"}} <code>{{.}}</code></p>{{end}}
 {{if .Data.Lines}}
 <pre class="code log logs">{{range .Data.Lines}}<span class="ts">{{clock .At}}</span> {{if eq (print .Source) "request"}}<span class="tag req">{{t "logs.req"}}</span> {{.Method}} {{.Path}} <span class="st s{{.Status}}">{{.Status}}</span> <span class="muted">{{ms .Took}}</span>{{else}}<span class="tag {{.Stream}}">{{t "logs.out"}}</span> {{.Text}}{{end}}
 {{end}}</pre>
-{{else}}<p class="desc">{{t "logs.empty"}}</p>{{end}}
+{{else}}<p class="desc">{{if $d.Query}}{{t "logs.nomatch" $d.Query}}{{else}}{{t "logs.empty"}}{{end}}</p>{{end}}
 {{end}}

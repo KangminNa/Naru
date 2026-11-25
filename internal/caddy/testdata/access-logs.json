@@ -14,8 +14,9 @@
         "writer": {
           "filename": "/data/access.log",
           "output": "file",
-          "roll_keep": 5,
-          "roll_size_mb": 10
+          "roll_keep": 10,
+          "roll_keep_days": 14,
+          "roll_size_mb": 50
         }
       },
       "default": {

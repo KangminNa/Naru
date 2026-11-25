@@ -168,11 +168,35 @@ func (w ContainerSwapper) Retire(ctx context.Context, s model.Service, keep mode
 	log.Step("옛 컨테이너 내리기", "retiring the old container")
 	for _, old := range w.older(ctx, s, keep.Instance) {
 		w.t.Switch.TurnOff(ctx, old)
+		w.archive(ctx, s, old, log)
 		if err := w.t.Remover.Remove(ctx, old); err != nil {
 			fmt.Fprintf(log, "%s: %v\n", old, err)
 		} else {
 			fmt.Fprintf(log, "%s 내림 / removed\n", old)
 		}
+	}
+}
+
+// archiveLines는 지울 컨테이너에서 남길 앱 출력의 최대 줄 수다.
+const archiveLines = 5000
+
+// archive는 지울 컨테이너의 앱 출력을 남긴다 — 지우면 Docker가 함께 지운다. 이름에 배포 번호가 없으면(v1에서 온 것) 남기지 않는다.
+// 남기지 못해도 배포는 그대로 간다.
+func (w ContainerSwapper) archive(ctx context.Context, s model.Service, name string, log contract.DeployLogWriter) {
+	d := model.ContainerDeployment(name)
+	if w.t.AppLogs == nil || w.t.Archive == nil || d == 0 {
+		return
+	}
+	lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	lines, err := w.t.AppLogs.Recent(lctx, name, archiveLines)
+	cancel()
+	if err == nil && len(lines) > 0 {
+		err = w.t.Archive.Keep(s.Name, d, lines)
+	}
+	if err != nil {
+		fmt.Fprintf(log, "%s의 앱 출력을 보관하지 못했어요 / could not keep the output of %s: %v\n", name, name, err)
+	} else if len(lines) > 0 {
+		fmt.Fprintf(log, "%s의 앱 출력 %d줄을 보관했어요 — 로그 탭에서 볼 수 있어요 / kept %d lines of output from %s\n", name, len(lines), len(lines), name)
 	}
 }
 

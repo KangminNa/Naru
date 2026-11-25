@@ -20,6 +20,7 @@ type ControlParts struct {
 	Files    contract.SiteFiles
 	Past     contract.DeployHistoryReader
 	Events   contract.EventPublisher
+	Logs     contract.LogArchive // 보관한 앱 출력 — 서비스를 지우면 함께 (없으면 건너뛴다)
 }
 
 type serviceControl struct{ p ControlParts }
@@ -88,6 +89,9 @@ func (c serviceControl) Remove(ctx context.Context, id model.ServiceID) error {
 		}
 	}
 	c.p.Files.RemoveSite(s.Name) // 정적 사이트가 아니면 폴더가 없다
+	if c.p.Logs != nil {
+		c.p.Logs.RemoveAll(s.Name)
+	}
 	if err := c.p.Store.Delete(ctx, id); err != nil {
 		return err
 	}

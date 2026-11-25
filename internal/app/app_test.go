@@ -1480,6 +1480,69 @@ func TestAServiceCanJoinOtherNetworks(t *testing.T) {
 	}
 }
 
+// ── 로그 보관 · 찾기 · 받기 ──────────────
+
+func TestLogsOfEarlierDeploymentsAreKeptAndSearchable(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	h.post("/services/new", url.Values{"kind": {"image"}, "source": {"me/app"}, "domain": {"app.example.com"}})
+	h.app.wait()
+	h.post("/services/1/deploy", nil)
+	h.app.wait()
+
+	_, _, page := h.get("/services/1/logs")
+	if !strings.Contains(page, `<option value="1" >#1 · `) || !strings.Contains(page, "#2 지금 도는 것") {
+		t.Fatal("the first deployment's output was kept when it was taken down, and can be picked")
+	}
+	if !strings.Contains(h.lastDeployLog(1), "naru-app-1의 앱 출력 2줄을 보관했어요") {
+		t.Fatal(h.lastDeployLog(1))
+	}
+	_, _, page = h.get("/services/1/logs?deploy=1")
+	if !strings.Contains(page, "#1 배포의 보관된 앱 출력이에요") || !strings.Contains(page, "naru-app-1 listening on :80") || strings.Contains(page, "naru-app-2 listening") {
+		t.Fatal("the kept output of #1, not the running one")
+	}
+
+	// 찾기 — 앱 출력과 요청에서
+	_, _, page = h.get("/services/1/logs?q=" + url.QueryEscape("LISTENING"))
+	if !strings.Contains(page, "naru-app-2 listening on :80") || strings.Contains(page, "alert(1)") {
+		t.Fatal("only matching lines, case-insensitive")
+	}
+	if _, _, page = h.get("/services/1/logs?q=nothing-like-this"); !strings.Contains(page, "든 줄이 없어요") {
+		t.Fatal("says when nothing matches")
+	}
+	if _, _, page = h.get("/services/1/logs?q=" + url.QueryEscape(`"><script>`)); strings.Contains(page, `"><script>`) {
+		t.Fatal("the search text is escaped")
+	}
+
+	// 받기 — 글자 파일로
+	res, err := h.client.Get(h.srv.URL + "/services/1/logs.txt?deploy=1&q=listening")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || !strings.Contains(res.Header.Get("Content-Disposition"), `filename="app-1-logs.txt"`) ||
+		!strings.HasPrefix(res.Header.Get("Content-Type"), "text/plain") || !strings.Contains(string(body), "stdout naru-app-1 listening on :80") {
+		t.Fatalf("%d %v\n%s", res.StatusCode, res.Header, body)
+	}
+
+	// 서비스를 지우면 보관한 것도
+	h.post("/services/1/delete", url.Values{"confirm": {"app"}})
+	h.app.wait()
+	if _, err := os.Stat(filepath.Join(h.app.cfg.DataDir, "logs", "app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("kept logs go with the service: %v", err)
+	}
+}
+
+func (h *harness) lastDeployLog(id model.ServiceID) string {
+	deps, _ := h.history().Recent(ctx, id, 1)
+	if len(deps) == 0 {
+		return ""
+	}
+	d, _ := h.history().Get(ctx, deps[0].ID)
+	return d.Log
+}
+
 // ── 저장소로 옮기기 (넘겨받기) ──────────────
 
 func TestMovingARunningContainerToARepository(t *testing.T) {

@@ -132,8 +132,13 @@ func TestDemuxStripsFrameHeaders(t *testing.T) {
 // 실제 dockerd(27)는 없는 네트워크로도 create를 받고 start에서야 실패한다 — 그래서 먼저 확인한다.
 func TestStartCreatesTheNetwork(t *testing.T) {
 	var calls []string
+	var created string
 	networkExists := false
 	sock := fakeDocker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/containers/create" {
+			b, _ := io.ReadAll(r.Body)
+			created = string(b)
+		}
 		calls = append(calls, r.Method+" "+r.URL.Path)
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/networks/naru-net":
@@ -168,6 +173,9 @@ func TestStartCreatesTheNetwork(t *testing.T) {
 	}
 	if strings.Count(strings.Join(calls, " "), "/networks/create") != 1 {
 		t.Fatalf("the network is created once: %v", calls)
+	}
+	if !strings.Contains(created, `"LogConfig":{"Config":{"max-file":"3","max-size":"10m"},"Type":"json-file"}`) {
+		t.Fatalf("container logs are capped — Docker's default never stops growing: %s", created)
 	}
 }
 

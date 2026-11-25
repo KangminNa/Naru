@@ -330,3 +330,27 @@ func TestEnvVarsFromAnotherContainer(t *testing.T) {
 		}
 	}
 }
+
+func TestLogQuery(t *testing.T) {
+	q := ParseLogQuery("app", "11", "  Error  ")
+	if q.Show != LogsApp || q.Deployment != 11 || q.Text != "Error" {
+		t.Fatalf("%+v", q)
+	}
+	if q := ParseLogQuery("weird", "-3", strings.Repeat("가", 300)); q.Show != LogsAll || q.Deployment != 0 || len([]rune(q.Text)) != 200 {
+		t.Fatalf("unknown is the default, the text is cut at 200 characters: %+v", q)
+	}
+	app := LogLine{Source: LogApp, Text: "FATAL: Heap out of memory"}
+	req := LogLine{Source: LogRequest, Method: "POST", Path: "/api/login", Status: 500}
+	for text, want := range map[string][2]bool{"": {true, true}, "heap": {true, false}, "/API/LOGIN": {false, true}, "500": {false, true}, "post /api": {false, true}} {
+		q := LogQuery{Text: text}
+		if q.Matches(app) != want[0] || q.Matches(req) != want[1] {
+			t.Errorf("%q: app %v req %v", text, q.Matches(app), q.Matches(req))
+		}
+	}
+	if ContainerDeployment("naru-my-blog-12") != 12 || ContainerDeployment("shelf-blog") != 0 || ContainerDeployment("x") != 0 {
+		t.Fatal("the deployment number is the suffix")
+	}
+	if HumanBytes(512) != "512 B" || HumanBytes(21<<30+400<<20) != "21.4 GB" {
+		t.Fatal(HumanBytes(21<<30 + 400<<20))
+	}
+}

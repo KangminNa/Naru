@@ -3,12 +3,15 @@ package files
 import (
 	"archive/tar"
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KangminNa/naru/internal/model"
 )
@@ -230,5 +233,59 @@ func TestPublishSkipsHiddenFilesAndLinks(t *testing.T) {
 	sites.RemoveSite(name)
 	if sites.Exists(to) {
 		t.Fatal("removed")
+	}
+}
+
+func TestLogArchivesKeepTenAndThirtyDays(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	a := LogArchives{root: root, now: func() time.Time { return now }}
+	blog, _ := model.ParseServiceName("blog")
+	line := func(s string) model.LogLine {
+		return model.LogLine{At: now, Source: model.LogApp, Stream: "stderr", Text: s}
+	}
+	if err := a.Keep(blog, 3, []model.LogLine{line("listening on :3000"), line("FATAL heap out of memory")}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.Read(blog, 3)
+	if err != nil || len(got) != 2 || got[1].Text != "FATAL heap out of memory" || got[1].Stream != "stderr" || !got[1].At.Equal(now) {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if info, _ := os.Stat(filepath.Join(root, "blog")); info.Mode().Perm() != 0o700 {
+		t.Fatalf("the folder is private: %v", info.Mode())
+	}
+	if err := a.Keep(blog, 4, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Read(blog, 4); !errors.Is(err, model.ErrNotFound) {
+		t.Fatal("nothing to keep, nothing kept")
+	}
+
+	for d := model.DeploymentID(5); d <= 16; d++ {
+		a.Keep(blog, d, []model.LogLine{line("hi")})
+	}
+	list, _ := a.List(blog)
+	if len(list) != 10 || list[0].Deployment != 16 || list[9].Deployment != 7 || list[0].Bytes == 0 {
+		t.Fatalf("the newest ten, newest first: %+v", list)
+	}
+	os.Chtimes(filepath.Join(root, "blog", "12.jsonl.gz"), now.Add(-31*24*time.Hour), now.Add(-31*24*time.Hour))
+	a.Keep(blog, 17, []model.LogLine{line("hi")})
+	list, _ = a.List(blog)
+	var nums []model.DeploymentID
+	for _, e := range list {
+		nums = append(nums, e.Deployment)
+	}
+	if fmt.Sprint(nums) != "[17 16 15 14 13 11 10 9 8]" {
+		t.Fatalf("older than 30 days goes too: %+v", list)
+	}
+	other, _ := model.ParseServiceName("other")
+	if l, err := a.List(other); err != nil || len(l) != 0 {
+		t.Fatal("a service with nothing kept has an empty list")
+	}
+	if err := a.RemoveAll(blog); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "blog")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("removing the service removes its logs")
 	}
 }

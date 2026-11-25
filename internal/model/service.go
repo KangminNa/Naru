@@ -145,9 +145,14 @@ func (l LiveState) LiveDeployment() DeploymentID {
 		n, _ := strconv.ParseInt(l.Release, 10, 64)
 		return DeploymentID(n)
 	}
-	for i := len(l.Instance) - 1; i >= 0; i-- {
-		if l.Instance[i] == '-' {
-			n, _ := strconv.ParseInt(l.Instance[i+1:], 10, 64)
+	return ContainerDeployment(l.Instance)
+}
+
+// ContainerDeployment는 Naru가 붙인 컨테이너 이름("naru-blog-12")의 배포 번호다. 번호가 없으면(v1에서 온 것) 0.
+func ContainerDeployment(name string) DeploymentID {
+	for i := len(name) - 1; i >= 0; i-- {
+		if name[i] == '-' {
+			n, _ := strconv.ParseInt(name[i+1:], 10, 64)
 			return DeploymentID(n)
 		}
 	}

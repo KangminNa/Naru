@@ -171,6 +171,8 @@ func TestEachEventKind(t *testing.T) {
 		{model.DockerDown{Why: "permission denied"}, "docker.down", model.AlertProblem},
 		{model.DockerUp{}, "docker.up", model.AlertRecovery},
 		{model.CertificateEndingSoon{Domain: "blog.example.com", NotAfter: time.Now().Add(5 * 24 * time.Hour)}, "certificate.ending", model.AlertProblem},
+		{model.DiskLow{Free: 8 << 30, Total: 100 << 30, Urgent: true}, "disk.low", model.AlertProblem},
+		{model.DiskOK{Free: 30 << 30, Total: 100 << 30}, "disk.ok", model.AlertRecovery},
 	}
 	for i, c := range cases {
 		bus.Publish(c.e)
@@ -182,6 +184,9 @@ func TestEachEventKind(t *testing.T) {
 	}
 	if s.sent[1].a.Service != "blog" || !strings.Contains(s.sent[1].a.Detail, "#7") {
 		t.Errorf("a failed deploy names its service and deployment: %+v", s.sent[1].a)
+	}
+	if low := s.sent[len(cases)-2].a; !strings.Contains(low.Title, "8.0 GB (8%)") || !strings.Contains(low.Title, "거의 찼어요") || !strings.Contains(low.Detail, "docker system df") {
+		t.Errorf("%+v", low)
 	}
 	bus.Publish(model.DeployFinished{Service: 1, Deployment: 8, OK: true})
 	bus.Publish(model.SiteMapChanged{Reason: "x"})

@@ -14,6 +14,7 @@ import (
 	"context"
 	"log/slog"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -33,6 +34,7 @@ type Parts struct {
 	Admin      contract.AdminDomainSetting
 	Diagnoser  contract.Diagnoser
 	Usage      contract.UsageReader
+	Stats      contract.ServerStats // 디스크 남은 공간 (없으면 보지 않는다)
 	Clock      contract.Clock
 	Events     contract.EventPublisher
 	Every      time.Duration // 0이면 30초
@@ -50,6 +52,7 @@ type healthWatcher struct {
 	docker     flag
 	webServer  flag
 	certWarned map[string]time.Time
+	disk       diskLevel                           // 마지막으로 본 디스크 상태
 	diagnosed  map[model.ServiceID][]model.Finding // 서비스마다 마지막 진단 — 배포 중에는 이것을 그대로 둔다
 }
 
@@ -163,6 +166,7 @@ func (w *healthWatcher) check(ctx context.Context) {
 	}
 	findings := w.diagnose(ctx, all, states)
 	findings = append(findings, w.warnCertificates(ctx, all, now)...)
+	findings = append(findings, w.watchDisk(first)...)
 	usage := w.readUsage(ctx, all, states)
 	w.publishSnapshot(all, findings, usage, now)
 }
@@ -366,4 +370,57 @@ func (w *healthWatcher) publishSnapshot(all []model.Service, findings []model.Fi
 	w.mu.Lock()
 	w.snap = snap
 	w.mu.Unlock()
+}
+
+// diskLevel은 디스크 남은 공간의 상태다.
+type diskLevel int
+
+const (
+	diskFine   diskLevel = iota
+	diskLow              // 20% 미만
+	diskUrgent           // 10% 미만
+)
+
+func diskLevelOf(free, total uint64) diskLevel {
+	switch {
+	case total == 0:
+		return diskFine
+	case free*10 < total:
+		return diskUrgent
+	case free*5 < total:
+		return diskLow
+	}
+	return diskFine
+}
+
+// watchDisk는 데이터 폴더가 있는 디스크를 본다. 나빠질 때마다(주의 → 긴급) 알리고, 20% 이상으로 돌아오면 한 번 알린다.
+// 처음 보았을 때 이미 모자랐으면 알리지 않고 "주의가 필요한 것"에만 둔다 (다시 켤 때마다 알리지 않게).
+func (w *healthWatcher) watchDisk(first bool) []model.Finding {
+	if w.p.Stats == nil {
+		return nil
+	}
+	snap := w.p.Stats.Now()
+	if !snap.HasDisk || snap.DiskTotal == 0 {
+		return nil
+	}
+	level := diskLevelOf(snap.DiskFree, snap.DiskTotal)
+	prev := w.disk
+	w.disk = level
+	if !first {
+		switch {
+		case level > prev:
+			w.p.Events.Publish(model.DiskLow{Free: snap.DiskFree, Total: snap.DiskTotal, Urgent: level == diskUrgent})
+		case level == diskFine && prev != diskFine:
+			w.p.Events.Publish(model.DiskOK{Free: snap.DiskFree, Total: snap.DiskTotal})
+		}
+	}
+	if level == diskFine {
+		return nil
+	}
+	f := model.Finding{Key: "find.disk", Level: model.FindingWarning,
+		Args: []string{model.HumanBytes(snap.DiskFree), strconv.Itoa(int(snap.DiskFree * 100 / snap.DiskTotal))}}
+	if level == diskUrgent {
+		f.Level = model.FindingUrgent
+	}
+	return []model.Finding{f}
 }

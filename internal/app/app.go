@@ -302,11 +302,12 @@ func (a *App) assemble() error {
 	// D. 종류
 	siteFiles := files.NewSiteFolders(filepath.Join(cfg.DataDir, "sites"))
 	a.work = files.NewTempFolders(filepath.Join(cfg.DataDir, "work"))
+	logArchive := files.NewLogArchives(filepath.Join(cfg.DataDir, "logs"))
 	lookup := kinds.NewLookup(kinds.Tools{
 		Work: a.work, Code: out.Code, Secrets: secrets,
 		Dockerfile: files.DockerfileReader{}, Packer: files.TarPacker{}, Builder: out.Builder, Puller: out.Puller,
 		Images: out.Images, Starter: out.Starter, Remover: out.Remover, Switch: out.Switch, Watcher: out.Watcher,
-		Ports: out.Ports, Files: siteFiles, Network: cfg.Network, SitesShown: cfg.CaddySites, ReadyTimeout: out.ReadyTimeout,
+		Ports: out.Ports, Files: siteFiles, AppLogs: out.AppLogs, Archive: logArchive, Network: cfg.Network, SitesShown: cfg.CaddySites, ReadyTimeout: out.ReadyTimeout,
 	})
 
 	// G. 웹서버
@@ -329,7 +330,7 @@ func (a *App) assemble() error {
 	a.wait = wait
 	control := deploy.NewServiceControl(deploy.ControlParts{
 		Services: serviceStore, Store: serviceStore, Live: liveStates, Lock: lock, Switch: out.Switch, Remover: out.Remover,
-		Watcher: out.Watcher, Images: out.Images, Files: siteFiles, Past: history, Events: bus,
+		Watcher: out.Watcher, Images: out.Images, Files: siteFiles, Past: history, Events: bus, Logs: logArchive,
 	})
 
 	// C. 서비스
@@ -359,7 +360,7 @@ func (a *App) assemble() error {
 	})
 	watcher, runWatch := watch.NewHealthWatcher(watch.Parts{
 		Services: serviceStore, Kinds: lookup, Containers: out.Watcher, Ports: out.Ports, Deployer: deployer,
-		WebServer: sync, Certs: out.Certs, Admin: adminDomain, Diagnoser: diagnoser, Usage: out.Usage, Clock: out.Clock, Events: bus, Every: out.WatchEvery, Log: a.log,
+		WebServer: sync, Certs: out.Certs, Admin: adminDomain, Diagnoser: diagnoser, Usage: out.Usage, Stats: out.Stats, Clock: out.Clock, Events: bus, Every: out.WatchEvery, Log: a.log,
 	})
 	a.alerts, a.watch = runAlerts, runWatch
 
@@ -367,7 +368,7 @@ func (a *App) assemble() error {
 	viewer := views.NewServiceViewer(views.Parts{
 		Services: serviceStore, Secrets: secrets, History: history, Containers: out.Watcher, Kinds: lookup,
 		Admin: adminDomain, Deployer: deployer, Certs: out.Certs, Clock: out.Clock, HTTPSPort: cfg.HTTPSPort, Web: webStore,
-		AppLogs: out.AppLogs, Access: out.Access, Watch: watcher,
+		AppLogs: out.AppLogs, Access: out.Access, Watch: watcher, Archive: logArchive,
 	}, a.log)
 	finder := views.NewContainerFinder(views.FinderParts{
 		Services: serviceStore, Containers: out.Watcher, Inspector: out.Inspect, Hide: []string{cfg.CaddyContainer, selfHost(cfg.SelfUpstream)},

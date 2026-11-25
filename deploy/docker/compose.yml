@@ -11,6 +11,9 @@ services:
     image: caddy:2.11.9
     container_name: naru-caddy                      # shelf- 로 시작하면 안 된다 (v1이 앱으로 오해한다)
     restart: unless-stopped
+    logging:                                        # 로그를 끝없이 쌓지 않는다 (Docker 기본값은 제한 없음)
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
     command: caddy run --resume --config /etc/caddy/bootstrap.json
     ports:
       - "80:80"
@@ -33,6 +36,9 @@ services:
     image: naru:local
     container_name: naru
     restart: unless-stopped
+    logging:                                        # 로그를 끝없이 쌓지 않는다 (Docker 기본값은 제한 없음)
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
     env_file:
       - path: .env
         required: false

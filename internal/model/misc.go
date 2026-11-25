@@ -1,9 +1,24 @@
 package model
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 )
+
+// HumanBytes는 크기를 사람이 읽는 글자로 — "21.4 GB" (1024 단위).
+func HumanBytes(n uint64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := uint64(unit), 0
+	for m := n / unit; m >= unit && exp < 4; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTP"[exp])
+}
 
 // ── 계정 ─────────────────────────────────
 

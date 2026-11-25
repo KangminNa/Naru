@@ -387,12 +387,42 @@ func (s *Server) logsPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	lv, err := s.d.Viewer.Logs(r.Context(), model.ServiceID(pathID(r, "id")), model.ParseLogFilter(r.URL.Query().Get("show")))
+	q := r.URL.Query()
+	lv, err := s.d.Viewer.Logs(r.Context(), model.ServiceID(pathID(r, "id")), model.ParseLogQuery(q.Get("show"), q.Get("deploy"), q.Get("q")))
 	if err != nil {
 		s.render(w, r, http.StatusNotFound, "notfound", view{})
 		return
 	}
 	s.render(w, r, http.StatusOK, "logs", view{Nav: "home", User: &u, Data: lv})
+}
+
+// logsText는 로그 화면에서 고른 것을 글자 파일로 준다 (받기). 화면보다 많은 줄(5,000줄까지).
+func (s *Server) logsText(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.gate(w, r); !ok {
+		return
+	}
+	q := r.URL.Query()
+	query := model.ParseLogQuery(q.Get("show"), q.Get("deploy"), q.Get("q"))
+	query.Download = true
+	lv, err := s.d.Viewer.Logs(r.Context(), model.ServiceID(pathID(r, "id")), query)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	name := lv.Service.Name.String()
+	if lv.Deployment != 0 {
+		name += fmt.Sprintf("-%d", lv.Deployment)
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`-logs.txt"`)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	for _, l := range lv.Lines {
+		if l.Source == model.LogRequest {
+			fmt.Fprintf(w, "%s request %s %s %d %dms\n", l.At.UTC().Format(time.RFC3339), l.Method, l.Path, l.Status, l.Took.Milliseconds())
+		} else {
+			fmt.Fprintf(w, "%s %s %s\n", l.At.UTC().Format(time.RFC3339), l.Stream, l.Text)
+		}
+	}
 }
 
 // ── 서비스 화면 그리기 ──────────────────────

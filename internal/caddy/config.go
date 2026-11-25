@@ -138,7 +138,7 @@ func (JSONWriter) Write(p model.SiteMap) ([]byte, error) {
 		c.Logging = &loggingConfig{Logs: map[string]map[string]any{
 			"default": {"exclude": []string{"http.log.access"}},
 			"access": {
-				"writer":  map[string]any{"output": "file", "filename": p.AccessLog, "roll_size_mb": 10, "roll_keep": 5},
+				"writer":  map[string]any{"output": "file", "filename": p.AccessLog, "roll_size_mb": 50, "roll_keep": 10, "roll_keep_days": 14},
 				"encoder": map[string]any{"format": "json"},
 				"include": []string{"http.log.access"},
 			},

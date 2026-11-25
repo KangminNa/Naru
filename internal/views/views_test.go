@@ -101,23 +101,23 @@ func TestLogsMergeAppOutputAndRequestsByTime(t *testing.T) {
 		Kinds: kinds.NewLookup(kinds.Tools{}), Deployer: deployer, Certs: noCerts{}, Clock: system.Clock{}, Web: store.NewWebSettings(db),
 		AppLogs: app, Access: access}, quiet)
 
-	all, err := v.Logs(ctx, id, model.LogsAll)
+	all, err := v.Logs(ctx, id, model.LogQuery{Show: model.LogsAll})
 	if err != nil || len(all.Lines) != 3 || all.Lines[0].Text != "start" || all.Lines[1].Source != model.LogRequest || all.Lines[2].Text != "handled" {
 		t.Fatalf("oldest first, both kinds interleaved: %+v %v", all.Lines, err)
 	}
 	if len(access.hosts) != 1 || access.hosts[0] != "blog.example.com" || !all.HasApp || !all.HasRequests {
 		t.Fatalf("requests are read for the service's addresses: %v", access.hosts)
 	}
-	if onlyApp, _ := v.Logs(ctx, id, model.LogsApp); len(onlyApp.Lines) != 2 {
+	if onlyApp, _ := v.Logs(ctx, id, model.LogQuery{Show: model.LogsApp}); len(onlyApp.Lines) != 2 {
 		t.Fatal("app filter")
 	}
-	if onlyReq, _ := v.Logs(ctx, id, model.LogsRequests); len(onlyReq.Lines) != 1 {
+	if onlyReq, _ := v.Logs(ctx, id, model.LogQuery{Show: model.LogsRequests}); len(onlyReq.Lines) != 1 {
 		t.Fatal("request filter")
 	}
 	v = NewServiceViewer(Parts{Services: services, Secrets: store.NewSecrets(db), History: store.NewDeployments(db), Containers: noContainers{},
 		Kinds: kinds.NewLookup(kinds.Tools{}), Deployer: deployer, Certs: noCerts{}, Clock: system.Clock{}, Web: store.NewWebSettings(db),
 		AppLogs: fakeAppLogs{err: errors.New("docker: not found")}, Access: access}, quiet)
-	if half, _ := v.Logs(ctx, id, model.LogsAll); half.AppError == "" || len(half.Lines) != 1 {
+	if half, _ := v.Logs(ctx, id, model.LogQuery{Show: model.LogsAll}); half.AppError == "" || len(half.Lines) != 1 {
 		t.Fatalf("one side failing still shows the other: %+v", half)
 	}
 }

@@ -381,7 +381,7 @@ type ServiceViewer interface {
 	Home(ctx context.Context) (model.HomeView, error)
 	Detail(ctx context.Context, id model.ServiceID) (model.ServiceView, error)
 	Deployment(ctx context.Context, id model.ServiceID, d model.DeploymentID) (model.DeploymentView, error)
-	Logs(ctx context.Context, id model.ServiceID, f model.LogFilter) (model.LogsView, error) // 앱 출력과 요청을 시간순으로
+	Logs(ctx context.Context, id model.ServiceID, q model.LogQuery) (model.LogsView, error) // 앱 출력과 요청을 시간순으로 (지난 배포는 보관한 것에서)
 }
 
 // ContainerFinder는 Naru가 띄우지 않은, 이 서버의 다른 컨테이너를 찾는다. 보기만 한다 — 끄거나 지우지 않는다.
@@ -479,6 +479,14 @@ type SiteFiles interface {
 // ContainerLogReader는 컨테이너가 찍은 최근 n줄을 시각과 함께 읽는다.
 type ContainerLogReader interface {
 	Recent(ctx context.Context, container string, n int) ([]model.LogLine, error)
+}
+
+// LogArchive는 지운 컨테이너의 앱 출력을 서비스·배포마다 남긴다 (압축 파일). 서비스마다 최근 10개·30일까지.
+type LogArchive interface {
+	Keep(s model.ServiceName, d model.DeploymentID, lines []model.LogLine) error
+	List(s model.ServiceName) ([]model.LogArchiveEntry, error) // 최근 것부터
+	Read(s model.ServiceName, d model.DeploymentID) ([]model.LogLine, error)
+	RemoveAll(s model.ServiceName) error
 }
 
 // ContainerInspector는 컨테이너 하나의 환경 변수·볼륨·출처를 읽는다. 환경 변수 값은 비밀이다 — web·cli는 쓰지 않는다 (R10).

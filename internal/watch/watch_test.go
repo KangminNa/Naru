@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -135,6 +136,14 @@ type rig struct {
 	events     *recorder
 	dns        *fakeDNS
 	usage      *fakeUsage
+	stats      *fakeStats
+}
+
+// fakeStats는 디스크 남은 공간만 정해 둔다.
+type fakeStats struct{ free, total uint64 }
+
+func (s *fakeStats) Now() model.ServerSnapshot {
+	return model.ServerSnapshot{HasDisk: s.total > 0, DiskFree: s.free, DiskTotal: s.total}
 }
 
 func name(s string) model.ServiceName { n, _ := model.ParseServiceName(s); return n }
@@ -156,11 +165,12 @@ func newRig() *rig {
 	}
 	r.dns = &fakeDNS{ips: map[string][]string{}}
 	r.usage = &fakeUsage{fails: map[string]bool{}}
+	r.stats = &fakeStats{free: 50 << 30, total: 100 << 30}
 	lookup := kinds.NewLookup(kinds.Tools{})
 	w, _ := NewHealthWatcher(Parts{
 		Services: r.services, Kinds: lookup, Containers: r.containers, Ports: r.ports,
 		Deployer: r.deployer, WebServer: r.web, Certs: r.certs, Admin: &fakeAdmin{}, Clock: r.clock, Events: r.events,
-		Usage: r.usage,
+		Usage: r.usage, Stats: r.stats,
 		Diagnoser: NewDiagnoser(DiagnoserParts{Kinds: lookup, Ports: r.ports, DNS: r.dns, Admin: &fakeAdmin{}, Certs: r.certs, Clock: r.clock, PublicIP: "198.51.100.24",
 			WebServer: r.web, AppNetwork: "shelf-net"}),
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -393,4 +403,62 @@ func (s *slowUsage) Usage(context.Context, string) (model.ResourceUsage, error) 
 	s.now--
 	s.mu.Unlock()
 	return model.ResourceUsage{CPUPercent: 1}, nil
+}
+
+func TestDiskRunningLowIsAlertedAsItGetsWorse(t *testing.T) {
+	r := newRig()
+	disk := func() []model.Finding {
+		var out []model.Finding
+		for _, f := range r.w.Snapshot().Findings {
+			if f.Key == "find.disk" {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+	kinds := func(evs []model.Event) string {
+		var s []string
+		for _, e := range evs {
+			switch x := e.(type) {
+			case model.DiskLow:
+				s = append(s, fmt.Sprintf("low(urgent=%v)", x.Urgent))
+			case model.DiskOK:
+				s = append(s, "ok")
+			}
+		}
+		return strings.Join(s, " ")
+	}
+	r.check()
+	if len(disk()) != 0 {
+		t.Fatal("half free is fine")
+	}
+	r.stats.free = 15 << 30
+	if got := kinds(r.check()); got != "low(urgent=false)" {
+		t.Fatalf("%q", got)
+	}
+	if f := disk(); len(f) != 1 || f[0].Level != model.FindingWarning || f[0].Args[0] != "15.0 GB" || f[0].Args[1] != "15" || f[0].Service != 0 {
+		t.Fatalf("%+v", f)
+	}
+	if got := kinds(r.check()); got != "" {
+		t.Fatal("once per change")
+	}
+	r.stats.free = 8 << 30
+	if got := kinds(r.check()); got != "low(urgent=true)" || disk()[0].Level != model.FindingUrgent {
+		t.Fatalf("worse is alerted again: %q", got)
+	}
+	r.stats.free = 12 << 30
+	if got := kinds(r.check()); got != "" || disk()[0].Level != model.FindingWarning {
+		t.Fatalf("getting a little better is quiet: %q", got)
+	}
+	r.stats.free = 30 << 30
+	if got := kinds(r.check()); got != "ok" || len(disk()) != 0 {
+		t.Fatalf("back above 20%% is alerted once: %q", got)
+	}
+
+	// 처음 보았을 때 이미 모자랐으면 알리지 않고 보여 주기만 한다
+	r2 := newRig()
+	r2.stats.free = 5 << 30
+	if got := kinds(r2.check()); got != "" || len(r2.w.Snapshot().Findings) == 0 {
+		t.Fatalf("%q", got)
+	}
 }

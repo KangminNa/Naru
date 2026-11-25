@@ -173,6 +173,7 @@
 | `ContainerSwitch` | 컨테이너를 멈추고 켠다 | `docker.Containers` |
 | `ContainerWatcher` | 컨테이너 상태·로그, 이 서비스의 컨테이너 목록을 본다 | `docker.Containers` |
 | `ContainerLogReader` | 컨테이너가 찍은 최근 줄을 시각·stdout/stderr와 함께 읽는다 | `docker.Containers` |
+| `LogArchive` | 배포를 바꿀 때 지우는 옛 컨테이너의 앱 출력을 서비스·배포마다 압축 파일로 남기고 읽는다 — 서비스마다 최근 10개·30일, 서비스를 지우면 함께 | `files.LogArchives` |
 | `NetworkJoiner` | 컨테이너가 붙은 네트워크를 알려주고, 컨테이너를 네트워크에 붙이고 뗀다 (이미 붙어 있으면 그대로) | `docker.Containers` |
 | `UsageReader` | 컨테이너 하나의 CPU·메모리 사용량을 읽는다 (Docker stats 한 번 — 1초쯤 걸려 지켜보기 고리에서만 부른다) | `docker.Containers` |
 | `AccessLogReader` | 웹서버가 남긴 요청 기록 파일에서 그 주소들의 최근 요청을 읽는다 (파일 끝 4MB만) | `caddy.AccessLogFile` |
@@ -387,7 +388,8 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | 이름 | 무엇 |
 |---|---|
 | `LogLine` · `LogSource` | 로그 한 줄 — 시각, 앱/요청, 앱이면 stdout/stderr와 글자, 요청이면 메서드·경로·상태·걸린 시간 |
-| `LogFilter` · `LogsView` | 전체·앱·요청 중 무엇을 볼지 · 서비스 로그 화면 (읽지 못한 쪽은 이유와 함께) |
+| `LogFilter` · `LogQuery` · `LogsView` | 전체·앱·요청 중 무엇을 볼지 · 로그 화면에서 고른 것(무엇을, 어느 배포, 찾을 글자) · 서비스 로그 화면 (읽지 못한 쪽은 이유와 함께, 보관된 지난 배포 목록) |
+| `LogArchiveEntry` | 보관된 앱 출력 하나 — 배포 번호, 남긴 때, 크기 |
 
 **접근 로그에 남기지 않는 것:** 관리 주소와 주소 없이 들어온 요청(웹훅의 `?secret=`, 첫 설정의 `?token=`) — 서비스 주소만 남긴다 (`skip_unmapped_hosts`).
 `Authorization`·`Cookie`는 Caddy가 `REDACTED`로 남긴다 (실측). 앱 주소의 쿼리 문자열은 그대로 남는다 — 내 서버의 로그다.
@@ -413,6 +415,7 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `ServiceDown` · `ServiceUp` | 컨테이너 서비스가 (두 번 연속) 멈췄을 때 · 다시 응답할 때 |
 | `WebServerDown` · `WebServerUp` · `DockerDown` · `DockerUp` | 웹서버·Docker에 (두 번 연속) 닿지 않을 때 · 다시 닿을 때 |
 | `CertificateEndingSoon` | 인증서가 곧 끝날 때 — 수명의 1/6 미만 (주소마다 하루 한 번) |
+| `DiskLow` · `DiskOK` | 데이터 폴더가 있는 디스크의 남은 공간이 20%(주의)·10%(긴급) 아래로 내려갈 때(더 나빠질 때마다) · 다시 20% 이상일 때 |
 
 ---
 
@@ -793,7 +796,7 @@ type ServiceViewer interface {
 	Home(ctx context.Context) (model.HomeView, error)
 	Detail(ctx context.Context, id model.ServiceID) (model.ServiceView, error)
 	Deployment(ctx context.Context, id model.ServiceID, d model.DeploymentID) (model.DeploymentView, error)
-	Logs(ctx context.Context, id model.ServiceID, f model.LogFilter) (model.LogsView, error) // 앱 출력과 요청을 시간순으로
+	Logs(ctx context.Context, id model.ServiceID, q model.LogQuery) (model.LogsView, error) // 앱 출력과 요청을 시간순으로 (지난 배포는 보관한 것에서)
 }
 
 // ContainerFinder는 Naru가 띄우지 않은, 이 서버의 다른 컨테이너를 찾는다. 보기만 한다 — 끄거나 지우지 않는다.
@@ -893,6 +896,14 @@ type ContainerLogReader interface {
 	Recent(ctx context.Context, container string, n int) ([]model.LogLine, error)
 }
 
+// LogArchive는 지운 컨테이너의 앱 출력을 서비스·배포마다 남긴다 (압축 파일). 서비스마다 최근 10개·30일까지.
+type LogArchive interface {
+	Keep(s model.ServiceName, d model.DeploymentID, lines []model.LogLine) error
+	List(s model.ServiceName) ([]model.LogArchiveEntry, error) // 최근 것부터
+	Read(s model.ServiceName, d model.DeploymentID) ([]model.LogLine, error)
+	RemoveAll(s model.ServiceName) error
+}
+
 // ContainerInspector는 컨테이너 하나의 환경 변수·볼륨·출처를 읽는다. 환경 변수 값은 비밀이다 — web·cli는 쓰지 않는다 (R10).
 type ContainerInspector interface {
 	Inspect(ctx context.Context, name string) (model.ContainerDetails, error) // 없는 컨테이너면 model.ErrNotFound
@@ -974,11 +985,11 @@ type RandomTokens interface {
 | `serviceEditor` | ServiceReader · ServiceStore · DomainStore · SecretStore · NameChooser · DomainChecker · KindLookup · RandomTokens · EventPublisher · ContainerInspector(넘겨받을 때 고른 환경 변수의 값) |
 | `serviceLauncher` | ServiceEditor · KindLookup · Deployer |
 | `deployer` | DeployLock · DeployHistoryStore · DeployHistoryReader · DeployLog · ServiceReader · LiveStateStore · KindLookup · OldVersionCleaner · EventPublisher · WebServerSync · DomainMover(넘겨받기 — 새 것이 응답한 뒤 주소를 옮긴다) |
-| `serviceControl` | ServiceReader · ServiceStore · LiveStateStore · DeployLock · ContainerSwitch · ContainerRemover · ContainerWatcher · ImageCleaner · SiteFiles · DeployHistoryReader · EventPublisher |
+| `serviceControl` | ServiceReader · ServiceStore · LiveStateStore · DeployLock · ContainerSwitch · ContainerRemover · ContainerWatcher · ImageCleaner · SiteFiles · DeployHistoryReader · EventPublisher · LogArchive |
 | `RepoBuilder` | WorkFolder · CodeDownloader · SecretStore · DockerfilePortReader · BuildContextPacker · ImageBuilder |
 | `ImageFetcher` | ImagePuller |
 | `StaticBuilder` | WorkFolder · CodeDownloader · SecretStore · SiteFiles |
-| `ContainerSwapper` | ContainerStarter · ContainerRemover · ContainerSwitch · ContainerWatcher · PortChecker · SecretStore · ImageCleaner |
+| `ContainerSwapper` | ContainerStarter · ContainerRemover · ContainerSwitch · ContainerWatcher · PortChecker · SecretStore · ImageCleaner · ContainerLogReader · LogArchive(옛 것을 지우기 전에 앱 출력을 남긴다) |
 | `FolderSwapper` | SiteFiles |
 | `oldVersionCleaner` | DeployHistoryReader · ImageCleaner · SiteFiles |
 | `hookReceiver` | ServiceReader · SecretStore · SignatureChecker(차례로) · BranchFilter · Deployer · HookLogStore · Clock |
@@ -988,7 +999,7 @@ type RandomTokens interface {
 | `containerFinder` | ServiceReader · ContainerWatcher · ContainerInspector (+ 숨길 컨테이너 이름 — Naru 자신과 웹서버 — 과 앱 네트워크 이름은 만들 때 받는다) |
 | `serviceViewer` | ServiceReader · SecretStore · DeployHistoryReader · ContainerWatcher · KindLookup · AdminDomainSetting · Deployer · CertificateReader · Clock · WebSettingsStore · ContainerLogReader · AccessLogReader · HealthWatcher |
 | `webSettingsEditor` | ServiceReader · WebSettingsStore · SnippetCompiler · LoginHasher · WebServerSync |
-| `healthWatcher` | ServiceReader · KindLookup · ContainerWatcher · PortChecker · Deployer · WebServerSync · CertificateReader · AdminDomainSetting · Diagnoser · UsageReader · Clock · EventPublisher |
+| `healthWatcher` | ServiceReader · KindLookup · ContainerWatcher · PortChecker · Deployer · WebServerSync · CertificateReader · AdminDomainSetting · Diagnoser · UsageReader · Clock · EventPublisher · ServerStats(디스크 남은 공간) |
 | `diagnoser` | KindLookup · PortChecker · DNSChecker · AdminDomainSetting · CertificateReader · WebServerSync · Clock (+ `NARU_PUBLIC_IP` 값은 만들 때 받는다) |
 | `alerts` | ChannelStore · DeliveryLog · AlertSender · ServiceReader · EventSubscriber · Clock |
 | `web` | LoginManager · AccountManager · SetupKey · AdminDomainSetting · CertEmailSetting · SetupProgress · ServiceLauncher · ServiceEditor · ServiceViewer · ContainerFinder · Deployer · ServiceControl · HookReceiver · ServerStats · WebServerSync · DNSChecker · CertificateReader · Clock · WebSettingsEditor · NginxTranslator · AlertSettings |

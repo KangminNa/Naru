@@ -205,6 +205,9 @@ func (c *Client) create(ctx context.Context, s Spec) (string, error) {
 			"RestartPolicy": map[string]string{"Name": "unless-stopped"},
 			"Binds":         s.Binds,
 			"NetworkMode":   s.Network,
+			// Docker 기본값(json-file)은 로그를 끝없이 쌓는다 — 출력이 많은 앱이 디스크를 채우지 않게 30MB까지.
+			// 지운 컨테이너의 출력은 Naru가 따로 보관한다 (LogArchive).
+			"LogConfig": map[string]any{"Type": "json-file", "Config": map[string]string{"max-size": "10m", "max-file": "3"}},
 		},
 	}
 	if s.Network != "" {

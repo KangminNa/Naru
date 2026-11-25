@@ -33,7 +33,8 @@ func NewAlerts(p Parts) (contract.AlertSettings, func(context.Context)) {
 	a := &alerts{p: p, queue: make(chan model.Event, 100)}
 	p.Events.Subscribe(func(e model.Event) {
 		switch x := e.(type) {
-		case model.ServiceDown, model.ServiceUp, model.WebServerDown, model.WebServerUp, model.DockerDown, model.DockerUp, model.CertificateEndingSoon:
+		case model.ServiceDown, model.ServiceUp, model.WebServerDown, model.WebServerUp, model.DockerDown, model.DockerUp, model.CertificateEndingSoon,
+			model.DiskLow, model.DiskOK:
 		case model.DeployFinished:
 			if x.OK {
 				return
@@ -111,6 +112,18 @@ func (a *alerts) describe(ctx context.Context, e model.Event) model.Alert {
 		return model.Alert{Event: "certificate.ending", Level: model.AlertProblem,
 			Title:  "인증서가 곧 끝나요: " + x.Domain + " / Certificate ending soon: " + x.Domain,
 			Detail: fmt.Sprintf("%d일 남았어요. 보통은 30일 전에 갱신돼요 — 갱신이 막힌 것 같아요 / %d days left; renewal seems stuck", days, days)}
+	case model.DiskLow:
+		left := fmt.Sprintf("%s (%d%%)", model.HumanBytes(x.Free), x.Free*100/max(x.Total, 1))
+		title := "디스크가 모자라요: " + left + " 남음 / Disk running low: " + left + " free"
+		if x.Urgent {
+			title = "디스크가 거의 찼어요: " + left + " 남음 / Disk almost full: " + left + " free"
+		}
+		return model.Alert{Event: "disk.low", Level: model.AlertProblem, Title: title,
+			Detail: "서버에서 docker system df로 무엇이 차지하는지 보세요 — 옛 이미지·빌드 캐시가 많으면 docker image prune · docker builder prune / " +
+				"run docker system df on the server to see what uses the space"}
+	case model.DiskOK:
+		left := fmt.Sprintf("%s (%d%%)", model.HumanBytes(x.Free), x.Free*100/max(x.Total, 1))
+		return model.Alert{Event: "disk.ok", Level: model.AlertRecovery, Title: "디스크 공간이 돌아왔어요: " + left + " 남음 / Disk space recovered: " + left + " free"}
 	}
 	return model.Alert{Event: "unknown", Level: model.AlertInfo, Title: fmt.Sprintf("%T", e)}
 }

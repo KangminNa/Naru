@@ -143,7 +143,7 @@ func (e serviceEditor) Create(ctx context.Context, in model.ServiceInput) (model
 		}
 	}
 	id, err := e.store.Create(ctx, model.NewService{
-		Name: name, Kind: in.Kind, Source: in.Source(), Branch: in.Branch.String(), BuildPath: in.BuildPath.String(),
+		Name: name, Kind: in.Kind, Source: in.Source(), Branch: in.Branch.String(), BuildPath: in.BuildPath.String(), BuildTarget: in.BuildTarget.String(),
 		Folder: in.Folder.String(), External: in.External.String(), Port: in.Port, Networks: in.Networks.String(), AutoDeploy: true, TakesOver: in.TakeOver,
 	})
 	if err != nil {
@@ -186,7 +186,7 @@ func (e serviceEditor) Update(ctx context.Context, id model.ServiceID, in model.
 	// 무엇이 바뀌었는지는 저장하기 전에 본다
 	deployable, container := tools.Builder != nil, tools.Destination.Find(s).Container
 	redeploy := deployable && (in.Source() != s.Source || in.Branch.String() != s.Branch ||
-		in.BuildPath.String() != s.BuildPath || in.Folder.String() != s.Folder || in.Token != "" ||
+		in.BuildPath.String() != s.BuildPath || in.BuildTarget.String() != s.BuildTarget || in.Folder.String() != s.Folder || in.Token != "" ||
 		in.EnvFile.Text() != old.EnvFile.Text())
 	if container && (old.Env.Text() != in.Env.Text() || old.Volumes.Text() != in.Volumes.Text() || in.Networks.String() != s.Networks) {
 		redeploy = true
@@ -197,7 +197,7 @@ func (e serviceEditor) Update(ctx context.Context, id model.ServiceID, in model.
 	}
 
 	if err := e.store.Update(ctx, id, model.ServiceSettings{
-		Source: in.Source(), Branch: in.Branch.String(), BuildPath: in.BuildPath.String(), Folder: in.Folder.String(),
+		Source: in.Source(), Branch: in.Branch.String(), BuildPath: in.BuildPath.String(), BuildTarget: in.BuildTarget.String(), Folder: in.Folder.String(),
 		External: in.External.String(), Port: in.Port, Networks: in.Networks.String(), AutoDeploy: auto,
 	}); err != nil {
 		return false, err
@@ -252,7 +252,8 @@ func (e serviceEditor) SetPort(ctx context.Context, id model.ServiceID, p model.
 		return model.InputError{Field: "port", Code: "port"}
 	}
 	if err := e.store.Update(ctx, id, model.ServiceSettings{
-		Source: s.Source, Branch: s.Branch, BuildPath: s.BuildPath, Folder: s.Folder, External: s.External, Port: p, AutoDeploy: s.AutoDeploy,
+		Source: s.Source, Branch: s.Branch, BuildPath: s.BuildPath, BuildTarget: s.BuildTarget, Folder: s.Folder, External: s.External, Port: p,
+		Networks: s.Networks, AutoDeploy: s.AutoDeploy, // 포트만 바꾼다 — 나머지는 그대로 다시 쓴다
 	}); err != nil {
 		return err
 	}

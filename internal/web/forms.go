@@ -16,6 +16,7 @@ type serviceForm struct {
 	Source     string
 	Branch     string
 	BuildPath  string
+	Target     string // 빌드 타깃
 	Folder     string
 	Upstream   string
 	Port       string
@@ -41,6 +42,7 @@ func readServiceForm(r *http.Request) serviceForm {
 		Source:     strings.TrimSpace(r.FormValue("source")),
 		Branch:     strings.TrimSpace(r.FormValue("branch")),
 		BuildPath:  strings.TrimSpace(r.FormValue("build_path")),
+		Target:     strings.TrimSpace(r.FormValue("build_target")),
 		Folder:     strings.TrimSpace(r.FormValue("folder")),
 		Upstream:   strings.TrimSpace(r.FormValue("upstream")),
 		Port:       strings.TrimSpace(r.FormValue("port")),
@@ -65,7 +67,7 @@ func formFrom(f model.ServiceForm) serviceForm {
 		port = strconv.Itoa(int(f.Port))
 	}
 	return serviceForm{
-		Source: f.Source, Branch: f.Branch, BuildPath: f.BuildPath, Folder: f.Folder, Upstream: f.External,
+		Source: f.Source, Branch: f.Branch, BuildPath: f.BuildPath, Target: f.BuildTarget, Folder: f.Folder, Upstream: f.External,
 		Port: port, AutoDeploy: f.AutoDeploy, Env: f.EnvText, EnvFile: f.EnvFileText, Volumes: f.Volumes, Networks: f.Networks,
 	}
 }
@@ -97,6 +99,9 @@ func (f serviceForm) input(kind model.KindName) (model.ServiceInput, []model.Env
 		}
 	}
 	if in.BuildPath, err = model.ParseFolderPath(f.BuildPath); err != nil {
+		return in, nil, err
+	}
+	if in.BuildTarget, err = model.ParseBuildTarget(f.Target); err != nil {
 		return in, nil, err
 	}
 	if in.Folder, err = model.ParseFolderPath(f.Folder); err != nil {

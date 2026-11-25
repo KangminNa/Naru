@@ -169,6 +169,8 @@
     {{end}}
     {{if eq (print $s.Kind) "repo"}}
     <label class="field"><span>{{t "service.buildpath"}}</span><input class="input mono" name="build_path" value="{{$f.BuildPath}}"></label>
+    <label class="field"><span>{{t "field.buildtarget"}}</span><input class="input mono" name="build_target" value="{{$f.Target}}" placeholder="web">
+      <small>{{t "buildtarget.hint"}}</small></label>
     {{end}}
     {{if eq (print $s.Kind) "image"}}
     <label class="field"><span>{{t "field.image"}}</span><input class="input mono" name="source" value="{{$f.Source}}" required></label>

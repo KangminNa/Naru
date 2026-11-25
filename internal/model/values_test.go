@@ -354,3 +354,17 @@ func TestLogQuery(t *testing.T) {
 		t.Fatal(HumanBytes(21<<30 + 400<<20))
 	}
 }
+
+func TestBuildTarget(t *testing.T) {
+	if b, err := ParseBuildTarget("  Web "); err != nil || b.String() != "web" {
+		t.Fatalf("%q %v", b.String(), err)
+	}
+	if b, err := ParseBuildTarget(""); err != nil || !b.IsZero() {
+		t.Fatal("empty means the last stage")
+	}
+	for _, bad := range []string{"-web", "1web", "web app", "web;rm", strings.Repeat("a", 64), "--target=x"} {
+		if _, err := ParseBuildTarget(bad); err == nil {
+			t.Errorf("%q should be refused", bad)
+		}
+	}
+}

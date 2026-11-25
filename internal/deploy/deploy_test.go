@@ -34,6 +34,8 @@ type fakeDocker struct {
 	removedImg []string
 	listens    func(name string) bool // nil이면 모두 듣는다
 	exits      func(name string) bool // 시작하자마자 죽는가
+	loops      func(name string) bool // 죽고 Docker가 계속 다시 띄우는가 (재시작 정책)
+	target     string                 // 마지막 빌드의 타깃
 }
 
 type fakeContainer struct {
@@ -46,7 +48,10 @@ func newFakeDocker() *fakeDocker {
 	return &fakeDocker{containers: map[string]*fakeContainer{}, images: map[string]model.ImageDetails{}}
 }
 
-func (f *fakeDocker) Build(_ context.Context, folder io.Reader, tag string, log io.Writer) (model.ImageID, error) {
+func (f *fakeDocker) Build(_ context.Context, folder io.Reader, tag, target string, log io.Writer) (model.ImageID, error) {
+	f.mu.Lock()
+	f.target = target
+	f.mu.Unlock()
 	packed := map[string]string{}
 	tr := tar.NewReader(folder)
 	for {
@@ -142,6 +147,9 @@ func (f *fakeDocker) One(_ context.Context, name string) (model.ContainerState, 
 	}
 	if c.exited {
 		return model.ContainerState{Name: name, State: "exited", ExitCode: 1}, nil
+	}
+	if f.loops != nil && f.loops(name) {
+		return model.ContainerState{Name: name, Running: true, State: "running", Restarts: 3}, nil
 	}
 	return model.ContainerState{Name: name, Running: c.running, State: map[bool]string{true: "running", false: "created"}[c.running]}, nil
 }
@@ -378,8 +386,17 @@ func TestAFailingNewVersionLeavesTheOldOneServing(t *testing.T) {
 		t.Fatalf("the old version keeps serving: %v (good #%d)", names, good.ID)
 	}
 
+	// 죽고 Docker가 다시 띄우는 앱은 시간 초과까지 기다리지 않는다
 	r.docker.exits = nil
+	r.docker.loops = func(name string) bool { return name != oldName }
 	r.docker.listens = func(name string) bool { return name == oldName }
+	start := time.Now()
+	looping := r.deploy(id)
+	if looping.Status != model.DeployFailed || !strings.Contains(looping.Log, "앱이 시작하자마자 죽어요 — Docker가 3번 다시 띄웠어요") ||
+		strings.Contains(looping.Log, "다른 포트를 듣고") || time.Since(start) > 250*time.Millisecond {
+		t.Fatalf("a crash loop fails at once, without the wrong-port hint (%s):\n%s", time.Since(start), looping.Log)
+	}
+	r.docker.loops = nil
 	silent := r.deploy(id)
 	if silent.Status != model.DeployFailed || !strings.Contains(silent.Log, "포트 3000") {
 		t.Fatalf("a container that never answers fails too:\n%s", silent.Log)
@@ -459,6 +476,28 @@ func TestRepoBuildGetsTheEnvFile(t *testing.T) {
 	}
 	if _, ok := r.docker.packed[".env"]; ok {
 		t.Fatal("without the box the repo is packed as it is")
+	}
+}
+
+// Dockerfile에 앱이 여럿 — 타깃이 없으면 맨 마지막을 빌드하며 다른 단계를 알려 주고, 있으면 그것을, 없는 이름이면 빌드 전에 실패.
+func TestBuildTarget(t *testing.T) {
+	r := newRig(t)
+	r.git.files = map[string]string{"Dockerfile": "FROM node:24 AS deps\nFROM deps AS web\nEXPOSE 3000\nFROM node:24-slim AS egress\nEXPOSE 3128\n"}
+	id := r.create(model.NewService{Name: name("shop"), Kind: model.KindRepo, Source: "https://github.com/me/shop"}, "")
+	dep := r.deploy(id)
+	if r.docker.target != "" || !strings.Contains(dep.Log, "Dockerfile에 단계가 3개예요 — 맨 마지막(egress)을 빌드해요") || !strings.Contains(dep.Log, "deps, web, egress") || r.get(id).Port != 3128 {
+		t.Fatalf("%q port=%d\n%s", r.docker.target, r.get(id).Port, dep.Log)
+	}
+
+	web := r.create(model.NewService{Name: name("shop-web"), Kind: model.KindRepo, Source: "https://github.com/me/shop", BuildTarget: "web"}, "")
+	if dep := r.deploy(web); dep.Status != model.DeploySuccess || r.docker.target != "web" || r.get(web).Port != 3000 || !strings.Contains(dep.Log, "빌드 타깃: web") {
+		t.Fatalf("%q port=%d\n%s", r.docker.target, r.get(web).Port, dep.Log)
+	}
+
+	typo := r.create(model.NewService{Name: name("shop-typo"), Kind: model.KindRepo, Source: "https://github.com/me/shop", BuildTarget: "wbe"}, "")
+	builds := len(r.docker.builds)
+	if dep := r.deploy(typo); dep.Status != model.DeployFailed || !strings.Contains(dep.Log, `빌드 타깃 "wbe"가 Dockerfile에 없어요 — 있는 단계: deps, web, egress`) || len(r.docker.builds) != builds {
+		t.Fatalf("%s", dep.Log)
 	}
 }
 

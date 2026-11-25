@@ -37,23 +37,24 @@ func ParseKindName(s string) (KindName, error) {
 
 // ServiceInput은 화면에서 받은 서비스 값이다. 모양 검사는 값 객체가 이미 했다.
 type ServiceInput struct {
-	Kind       KindName
-	Name       ServiceName // 비면 NameChooser가 짓는다
-	Repo       RepoURL
-	Branch     Branch
-	Image      ImageRef
-	External   ExternalAddress
-	Folder     FolderPath
-	BuildPath  FolderPath
-	Port       Port
-	Domain     DomainName // 비어도 된다
-	Token      string     // 비면 그대로 둔다
-	ClearToken bool
-	Env        EnvVars
-	EnvFile    EnvFile // 저장소 종류만 — 빌드 폴더의 .env
-	Volumes    Volumes
-	Networks   NetworkNames // 컨테이너 종류만 — 앱 네트워크 말고 더 붙일 네트워크
-	AutoDeploy bool
+	Kind        KindName
+	Name        ServiceName // 비면 NameChooser가 짓는다
+	Repo        RepoURL
+	Branch      Branch
+	Image       ImageRef
+	External    ExternalAddress
+	Folder      FolderPath
+	BuildPath   FolderPath
+	BuildTarget BuildTarget // 저장소 종류만 — Dockerfile의 단계 이름
+	Port        Port
+	Domain      DomainName // 비어도 된다
+	Token       string     // 비면 그대로 둔다
+	ClearToken  bool
+	Env         EnvVars
+	EnvFile     EnvFile // 저장소 종류만 — 빌드 폴더의 .env
+	Volumes     Volumes
+	Networks    NetworkNames // 컨테이너 종류만 — 앱 네트워크 말고 더 붙일 네트워크
+	AutoDeploy  bool
 
 	// 돌고 있는 컨테이너를 넘겨받을 때만
 	EnvFrom  EnvFrom   // 그 컨테이너에서 가져올 환경 변수 (이름만 — 값은 서비스 쪽이 읽는다)
@@ -90,22 +91,23 @@ type DomainInput struct {
 
 // Service는 서비스 하나의 지금 모습이다. 비밀은 없다.
 type Service struct {
-	ID         ServiceID
-	Name       ServiceName
-	Kind       KindName
-	Source     string // 저장소 주소 또는 이미지 이름 (저장할 때 이미 검사됨)
-	Branch     string
-	BuildPath  string
-	Folder     string
-	External   string
-	Port       Port
-	Networks   string // 앱 네트워크 말고 더 붙일 네트워크 이름들 (빈칸으로 나눔)
-	AutoDeploy bool
-	TakesOver  ServiceID // 다음 배포가 성공하면 이 서비스의 주소와 웹서버 설정을 옮겨 온다 (0이면 없음)
-	Live       LiveState
-	HookLog    HookLog
-	Domains    []Domain
-	Created    time.Time
+	ID          ServiceID
+	Name        ServiceName
+	Kind        KindName
+	Source      string // 저장소 주소 또는 이미지 이름 (저장할 때 이미 검사됨)
+	Branch      string
+	BuildPath   string
+	BuildTarget string
+	Folder      string
+	External    string
+	Port        Port
+	Networks    string // 앱 네트워크 말고 더 붙일 네트워크 이름들 (빈칸으로 나눔)
+	AutoDeploy  bool
+	TakesOver   ServiceID // 다음 배포가 성공하면 이 서비스의 주소와 웹서버 설정을 옮겨 온다 (0이면 없음)
+	Live        LiveState
+	HookLog     HookLog
+	Domains     []Domain
+	Created     time.Time
 }
 
 // FromGit은 저장소에서 코드를 받는 서비스인가 — 소스가 저장소 주소다. git push 웹훅으로 배포한다.
@@ -161,31 +163,33 @@ func ContainerDeployment(name string) DeploymentID {
 
 // NewService는 저장할 새 서비스다.
 type NewService struct {
-	ID         ServiceID // 0이 아니면 그 번호 (v1 앱 번호를 지켜 웹훅 주소를 유지)
-	Name       ServiceName
-	Kind       KindName
-	Source     string
-	Branch     string
-	BuildPath  string
-	Folder     string
-	External   string
-	Port       Port
-	Networks   string
-	AutoDeploy bool
-	Alias      string
-	TakesOver  ServiceID
+	ID          ServiceID // 0이 아니면 그 번호 (v1 앱 번호를 지켜 웹훅 주소를 유지)
+	Name        ServiceName
+	Kind        KindName
+	Source      string
+	Branch      string
+	BuildPath   string
+	BuildTarget string
+	Folder      string
+	External    string
+	Port        Port
+	Networks    string
+	AutoDeploy  bool
+	Alias       string
+	TakesOver   ServiceID
 }
 
 // ServiceSettings는 고칠 수 있는 값이다.
 type ServiceSettings struct {
-	Source     string
-	Branch     string
-	BuildPath  string
-	Folder     string
-	External   string
-	Port       Port
-	Networks   string
-	AutoDeploy bool
+	Source      string
+	Branch      string
+	BuildPath   string
+	BuildTarget string
+	Folder      string
+	External    string
+	Port        Port
+	Networks    string
+	AutoDeploy  bool
 }
 
 // ServiceSecrets는 배포에만 쓰는 비밀이다. 화면 계층은 이 타입을 쓰지 않는다.

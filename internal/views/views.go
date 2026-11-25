@@ -113,7 +113,7 @@ func (v serviceViewer) Detail(ctx context.Context, id model.ServiceID) (model.Se
 		Service: s, Status: tools.Status.Read(s, containers), Target: to.Address, Container: to.Container,
 		Deployable: tools.Builder != nil, Deploying: v.p.Deployer.IsDeploying(id),
 		Form: model.ServiceForm{
-			Source: s.Source, Branch: s.Branch, BuildPath: s.BuildPath, Folder: s.Folder, External: s.External, Port: s.Port,
+			Source: s.Source, Branch: s.Branch, BuildPath: s.BuildPath, BuildTarget: s.BuildTarget, Folder: s.Folder, External: s.External, Port: s.Port,
 			AutoDeploy: s.AutoDeploy, EnvText: sec.Env.Text(), EnvFileText: sec.EnvFile.Text(), Volumes: sec.Volumes.Text(), Networks: s.Networks, HasToken: sec.GitToken != "",
 		},
 	}

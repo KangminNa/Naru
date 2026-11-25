@@ -546,6 +546,26 @@ func (f EnvFile) Bytes() []byte { return []byte(f.text) }
 // Lines는 줄 수다 — 배포 기록에는 내용 대신 이것만 남긴다.
 func (f EnvFile) Lines() int { return strings.Count(f.text, "\n") }
 
+// BuildTarget은 Dockerfile의 단계 이름이다 (FROM … AS web). 비면 맨 마지막 단계를 빌드한다.
+type BuildTarget struct{ v string }
+
+var buildTargetPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,62}$`)
+
+// ParseBuildTarget은 단계 이름 모양만 본다 — 그 단계가 Dockerfile에 있는지는 빌드할 때 본다. 비어도 된다.
+func ParseBuildTarget(s string) (BuildTarget, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return BuildTarget{}, nil
+	}
+	if !buildTargetPattern.MatchString(s) {
+		return BuildTarget{}, InputError{Field: "build_target", Code: "buildtarget"}
+	}
+	return BuildTarget{strings.ToLower(s)}, nil // Docker는 단계 이름의 대소문자를 가리지 않는다
+}
+
+func (b BuildTarget) String() string { return b.v }
+func (b BuildTarget) IsZero() bool   { return b.v == "" }
+
 // NetworkNames는 앱 컨테이너를 앱 네트워크 말고 더 붙일 Docker 네트워크 이름들이다.
 // 다른 compose 묶음의 DB 같은 컨테이너에 앱이 닿게 한다. 저장은 빈칸 하나로 이은 글.
 type NetworkNames struct{ text string }

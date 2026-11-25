@@ -26,7 +26,7 @@ func (ImageInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
 		return in, model.InputError{Field: "source", Code: "image"}
 	}
 	in.Repo, in.Branch, in.External = model.RepoURL{}, model.Branch{}, model.ExternalAddress{}
-	in.Folder, in.BuildPath, in.EnvFile = model.FolderPath{}, model.FolderPath{}, model.EnvFile{}
+	in.Folder, in.BuildPath, in.EnvFile, in.BuildTarget = model.FolderPath{}, model.FolderPath{}, model.EnvFile{}, model.BuildTarget{}
 	return in, nil
 }
 
@@ -40,7 +40,7 @@ func (StaticInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
 	if in.Branch.IsZero() {
 		in.Branch = model.DefaultBranch()
 	}
-	in.Image, in.External, in.BuildPath, in.Port = model.ImageRef{}, model.ExternalAddress{}, model.FolderPath{}, 0
+	in.Image, in.External, in.BuildPath, in.Port, in.BuildTarget = model.ImageRef{}, model.ExternalAddress{}, model.FolderPath{}, 0, model.BuildTarget{}
 	in.Env, in.EnvFile, in.Volumes, in.Networks = model.EnvVars{}, model.EnvFile{}, model.Volumes{}, model.NetworkNames{}
 	in.EnvFrom, in.TakeOver = model.EnvFrom{}, 0
 	return in, nil
@@ -54,7 +54,7 @@ func (ExternalInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
 		return in, model.InputError{Field: "upstream", Code: "upstream"}
 	}
 	in.Repo, in.Branch, in.Image = model.RepoURL{}, model.Branch{}, model.ImageRef{}
-	in.Folder, in.BuildPath, in.Port, in.AutoDeploy = model.FolderPath{}, model.FolderPath{}, 0, false
+	in.Folder, in.BuildPath, in.Port, in.AutoDeploy, in.BuildTarget = model.FolderPath{}, model.FolderPath{}, 0, false, model.BuildTarget{}
 	in.Env, in.EnvFile, in.Volumes, in.Networks = model.EnvVars{}, model.EnvFile{}, model.Volumes{}, model.NetworkNames{}
 	in.EnvFrom, in.TakeOver = model.EnvFrom{}, 0
 	return in, nil

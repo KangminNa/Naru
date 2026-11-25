@@ -38,7 +38,7 @@ var ctx = context.Background()
 
 type fakeRegistry struct{}
 
-func (fakeRegistry) Build(_ context.Context, folder io.Reader, tag string, _ io.Writer) (model.ImageID, error) {
+func (fakeRegistry) Build(_ context.Context, folder io.Reader, tag, _ string, _ io.Writer) (model.ImageID, error) {
 	io.Copy(io.Discard, folder)
 	return model.ImageID("sha256:" + tag), nil
 }
@@ -1477,6 +1477,52 @@ func TestAServiceCanJoinOtherNetworks(t *testing.T) {
 	}
 	if s := h.service(1); s.Networks != "cairn_default db-net" {
 		t.Fatalf("%q", s.Networks)
+	}
+}
+
+// ── 빌드 타깃 ──────────────
+
+func TestBuildTargetField(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	if _, _, page := h.get("/services/new?kind=repo"); !strings.Contains(page, `name="build_target"`) {
+		t.Fatal("repositories have the field")
+	}
+	if _, _, page := h.get("/services/new?kind=image"); strings.Contains(page, `name="build_target"`) {
+		t.Fatal("images build nothing")
+	}
+	if code, _, body := h.post("/services/new", url.Values{"kind": {"repo"}, "source": {"https://github.com/me/shop"}, "build_target": {"-web"}}); code != http.StatusBadRequest || !strings.Contains(body, "단계 이름") {
+		t.Fatalf("%d", code)
+	}
+	h.post("/services/new", url.Values{"kind": {"repo"}, "source": {"https://github.com/me/shop"}, "build_target": {"Web"}})
+	h.app.wait()
+	if s := h.service(1); s.BuildTarget != "web" {
+		t.Fatalf("%q", s.BuildTarget)
+	}
+	if _, _, page := h.get("/services/1"); !strings.Contains(page, `name="build_target" value="web"`) {
+		t.Fatal("the settings show it")
+	}
+	form := url.Values{"source": {"https://github.com/me/shop"}, "build_target": {"web"}}
+	if _, loc, _ := h.post("/services/1/settings", form); strings.Contains(loc, "redeploy") {
+		t.Fatal("unchanged")
+	}
+	form.Set("build_target", "server")
+	if _, loc, _ := h.post("/services/1/settings", form); !strings.Contains(loc, "ok=redeploy") {
+		t.Fatal("a new target needs a redeploy")
+	}
+}
+
+// [포트 바꾸기]는 포트만 바꾼다 — 다른 네트워크·빌드 타깃은 그대로.
+func TestSettingThePortKeepsTheOtherSettings(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	h.post("/services/new", url.Values{"kind": {"image"}, "source": {"me/app"}, "networks": {"shop_default"}})
+	h.app.wait()
+	if code, _, _ := h.post("/services/1/port", url.Values{"port": {"8080"}}); code != http.StatusSeeOther {
+		t.Fatalf("%d", code)
+	}
+	if s := h.service(1); s.Port != 8080 || s.Networks != "shop_default" {
+		t.Fatalf("%+v", s)
 	}
 }
 

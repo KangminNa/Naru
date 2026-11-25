@@ -32,7 +32,7 @@ func NewBuildxBuilder(bin, socket, temp string) BuildxBuilder {
 	return BuildxBuilder{bin: bin, socket: socket, temp: temp}
 }
 
-func (b BuildxBuilder) Build(ctx context.Context, buildFolder io.Reader, tag string, log io.Writer) (model.ImageID, error) {
+func (b BuildxBuilder) Build(ctx context.Context, buildFolder io.Reader, tag, target string, log io.Writer) (model.ImageID, error) {
 	if err := os.MkdirAll(b.temp, 0o700); err != nil {
 		return "", err
 	}
@@ -45,8 +45,11 @@ func (b BuildxBuilder) Build(ctx context.Context, buildFolder io.Reader, tag str
 
 	// --pull: 기반 이미지(FROM nginx:alpine 같은 움직이는 태그)를 배포마다 레지스트리에서 확인한다.
 	// 없으면 서버에 남은 옛 것으로 빌드해서, 기반 이미지의 보안 수정이 다시 배포해도 들어오지 않는다. 바뀌지 않았으면 받지 않는다.
-	cmd := exec.CommandContext(ctx, b.bin, "build", "--progress=plain", "--provenance=false", "--sbom=false", "--pull",
-		"--iidfile", iid, "--tag", tag, "-")
+	args := []string{"build", "--progress=plain", "--provenance=false", "--sbom=false", "--pull", "--iidfile", iid, "--tag", tag}
+	if target != "" {
+		args = append(args, "--target", target)
+	}
+	cmd := exec.CommandContext(ctx, b.bin, append(args, "-")...)
 	// TMPDIR도 이 폴더로 — buildx는 stdin 묶음을 임시 파일로 받는다. 빌드가 끝나면 함께 지운다.
 	cmd.Env = []string{"DOCKER_HOST=unix://" + b.socket, "DOCKER_CONFIG=" + dir, "HOME=" + dir, "TMPDIR=" + dir, "PATH=/usr/local/bin:/usr/bin:/bin"}
 	cmd.Dir = dir

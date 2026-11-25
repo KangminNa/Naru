@@ -97,6 +97,9 @@
         <label class="field"><span>{{t "service.buildpath"}}</span>
           <input class="input mono" name="build_path" value="{{$f.BuildPath}}" placeholder="apps/web">
           <small>{{t "new.buildpath.hint"}}</small></label>
+        <label class="field"><span>{{t "field.buildtarget"}}</span>
+          <input class="input mono" name="build_target" value="{{$f.Target}}" placeholder="web">
+          <small>{{t "buildtarget.hint"}}</small></label>
         {{end}}
         {{if eq $f.Kind "repo" "image"}}
         <label class="field"><span>{{t "service.port"}}</span>

@@ -187,7 +187,7 @@
 | `CodeDownloader` | 저장소 코드를 내려받는다 (토큰은 인자·설정 파일에 남기지 않는다) | `git.Downloader` |
 | `WorkFolder` | 잠깐 쓸 작업 폴더를 빌려주고 돌려받는다. 그 안의 경로를 심볼릭 링크로 빠져나가지 않게 찾아 준다 | `files.TempFolders` |
 | `BuildContextPacker` | 빌드할 폴더를 묶는다 (`.git`·`.dockerignore` 제외). 폴더에 없는 파일(`.env` 파일 칸)을 더해 넣는다 — 디스크에 쓰지 않는다 | `files.TarPacker` |
-| `DockerfilePortReader` | Dockerfile의 `EXPOSE`에서 앱 포트를 찾는다 | `files.DockerfileReader` |
+| `DockerfilePortReader` | Dockerfile에서 빌드할 단계의 `EXPOSE`(이어받은 단계 포함)와 단계 이름들을 읽는다 — 빌드 타깃이 있는지 미리 본다 | `files.DockerfileReader` |
 | `SiteFiles` | 정적 사이트 파일을 올리고·복사하고·지운다 (숨김 파일 제외) | `files.SiteFolders` |
 | `PortChecker` | 그 주소의 포트가 응답하는지 본다 | `netcheck.TCP` |
 | `DNSChecker` | 도메인이 이 서버를 가리키는지 본다 | `netcheck.DNS` |
@@ -297,6 +297,7 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `ImageRef` | Docker 이미지 이름 모양 |
 | `ExternalAddress` | `호스트:포트`. `localhost`·`127.0.0.1`은 웹서버 컨테이너 기준 주소로 바뀐다 |
 | `FolderPath` | 저장소 안을 벗어나지 않는 경로 (`..` 없음) |
+| `BuildTarget` | Dockerfile의 단계 이름(`FROM … AS web`) — 한 Dockerfile에 앱이 여럿일 때 빌드할 것. 비면 맨 마지막 단계(Docker의 기본) |
 | `Port` | 1~65535. 0은 "모름" |
 | `Email` | 인증서 연락처 이메일 |
 | `Username` | 계정 이름 — 영문·숫자·`.-_` 2~32자 |
@@ -850,7 +851,8 @@ type ServerStats interface {
 
 // ImageBuilder는 빌드할 폴더(묶은 것)로 이미지를 만든다.
 type ImageBuilder interface {
-	Build(ctx context.Context, buildFolder io.Reader, tag string, log io.Writer) (model.ImageID, error)
+	// target은 Dockerfile의 단계 이름(FROM … AS web) — 비면 맨 마지막 단계 (Docker의 기본)
+	Build(ctx context.Context, buildFolder io.Reader, tag, target string, log io.Writer) (model.ImageID, error)
 }
 
 // ImagePuller는 이미지를 받고 그 ID·열어둔 포트를 알려준다.
@@ -905,9 +907,10 @@ type BuildContextPacker interface {
 	Pack(folder string, extra map[string][]byte) io.ReadCloser
 }
 
-// DockerfilePortReader는 Dockerfile의 EXPOSE에서 앱 포트를 찾는다. Dockerfile이 없으면 found가 거짓.
+// DockerfilePortReader는 Dockerfile을 읽는다 — 빌드할 단계가 연 앱 포트(EXPOSE)와 단계 이름들. Dockerfile이 없으면 found가 거짓.
 type DockerfilePortReader interface {
-	Ports(folder string) (ports []model.Port, found bool)
+	Ports(folder, target string) (ports []model.Port, found bool) // target이 비면 맨 마지막 단계. 이어받은 단계(FROM 단계이름)의 EXPOSE도
+	Stages(folder string) []string                                 // "FROM … AS 이름"의 이름들, 적힌 순서대로
 }
 
 // SiteFiles는 정적 사이트 파일을 올리고·복사하고·지운다 (숨김 파일 제외).

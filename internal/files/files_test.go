@@ -74,14 +74,41 @@ func TestBorrowAndClear(t *testing.T) {
 	}
 }
 
+// Dockerfile 하나에 앱이 여럿 — 단계마다 EXPOSE, 이어받은 단계의 것도.
+func TestDockerfileStages(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, map[string]string{"Dockerfile": `FROM node:24 AS base
+EXPOSE 9229
+FROM base AS deps
+FROM deps AS server-build
+FROM node:24-slim AS server
+EXPOSE 4000
+FROM node:24-slim AS Web
+EXPOSE 3000
+FROM web AS web-debug
+FROM --platform=linux/arm64 node:24-slim AS egress
+EXPOSE 3128
+`})
+	r := DockerfileReader{}
+	if got := strings.Join(r.Stages(dir), " "); got != "base deps server-build server web web-debug egress" {
+		t.Fatalf("stage names in order, lowercased: %s", got)
+	}
+	for target, want := range map[string]string{"": "[3128]", "web": "[3000]", "WEB": "[3000]", "web-debug": "[3000]", "server": "[4000]", "server-build": "[9229]", "nope": "[]"} {
+		got, found := r.Ports(dir, target)
+		if !found || fmt.Sprint(got) != want {
+			t.Errorf("%q: %v (want %s)", target, got, want)
+		}
+	}
+}
+
 func TestDockerfilePorts(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, map[string]string{"Dockerfile": "FROM node:20\nEXPOSE 3000\nexpose 9229/tcp 53/udp\n# EXPOSE 1\n"})
-	got, found := DockerfileReader{}.Ports(dir)
+	got, found := DockerfileReader{}.Ports(dir, "")
 	if !found || len(got) != 2 || got[0] != 3000 || got[1] != 9229 {
 		t.Fatalf("%v %v", got, found)
 	}
-	if ports, found := (DockerfileReader{}).Ports(t.TempDir()); found || ports != nil {
+	if ports, found := (DockerfileReader{}).Ports(t.TempDir(), ""); found || ports != nil {
 		t.Fatal("no Dockerfile, no ports")
 	}
 }

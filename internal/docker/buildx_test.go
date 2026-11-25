@@ -42,12 +42,12 @@ func TestBuildxBuildsFromTheTarOnStdin(t *testing.T) {
 	t.Setenv("NARU_SECRET_SHOULD_NOT_LEAK", "x")
 	temp := filepath.Join(t.TempDir(), "buildx")
 	var log strings.Builder
-	id, err := NewBuildxBuilder(bin, "/run/docker.sock", temp).Build(context.Background(), strings.NewReader("TARBALL"), "naru-blog:7", &log)
+	id, err := NewBuildxBuilder(bin, "/run/docker.sock", temp).Build(context.Background(), strings.NewReader("TARBALL"), "naru-blog:7", "web", &log)
 	if err != nil || id != "sha256:abc" {
 		t.Fatalf("%q %v\n%s", id, err, log.String())
 	}
 	if args := strings.Fields(read(t, rec+"/args")); strings.Join(args, " ") !=
-		"build --progress=plain --provenance=false --sbom=false --pull --iidfile "+args[6]+" --tag naru-blog:7 -" {
+		"build --progress=plain --provenance=false --sbom=false --pull --iidfile "+args[6]+" --tag naru-blog:7 --target web -" {
 		t.Fatalf("args: %v", args)
 	}
 	if read(t, rec+"/stdin") != "TARBALL" || !strings.Contains(log.String(), "#1 [1/2] FROM busybox") {
@@ -66,17 +66,17 @@ func TestBuildxFailuresSayWhy(t *testing.T) {
 	temp := t.TempDir()
 	bin, _ := fakeBuildx(t, `echo "ERROR: failed to solve: process did not complete successfully" >&2; exit 1`)
 	var log strings.Builder
-	_, err := NewBuildxBuilder(bin, "/s", temp).Build(context.Background(), strings.NewReader(""), "t:1", &log)
+	_, err := NewBuildxBuilder(bin, "/s", temp).Build(context.Background(), strings.NewReader(""), "t:1", "", &log)
 	if err == nil || !strings.Contains(log.String(), "ERROR: failed to solve") || !strings.Contains(err.Error(), "ERROR") {
 		t.Fatalf("%v\n%s", err, log.String())
 	}
 
 	bin, _ = fakeBuildx(t, `echo not-an-id > $iid`)
-	if _, err := NewBuildxBuilder(bin, "/s", temp).Build(context.Background(), strings.NewReader(""), "t:1", &log); err == nil {
+	if _, err := NewBuildxBuilder(bin, "/s", temp).Build(context.Background(), strings.NewReader(""), "t:1", "", &log); err == nil {
 		t.Fatal("an odd image ID is refused")
 	}
 
-	if _, err := NewBuildxBuilder(filepath.Join(temp, "missing"), "/s", temp).Build(context.Background(), strings.NewReader(""), "t:1", &log); err == nil || !strings.Contains(err.Error(), "buildx") {
+	if _, err := NewBuildxBuilder(filepath.Join(temp, "missing"), "/s", temp).Build(context.Background(), strings.NewReader(""), "t:1", "", &log); err == nil || !strings.Contains(err.Error(), "buildx") {
 		t.Fatalf("a missing buildx says so: %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestBuildxFailuresSayWhy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if _, err := NewBuildxBuilder(bin, "/s", temp).Build(ctx, strings.NewReader(""), "t:1", &log); err != context.DeadlineExceeded || time.Since(start) > 10*time.Second {
+	if _, err := NewBuildxBuilder(bin, "/s", temp).Build(ctx, strings.NewReader(""), "t:1", "", &log); err != context.DeadlineExceeded || time.Since(start) > 10*time.Second {
 		t.Fatalf("cancelling stops the build: %v after %s", err, time.Since(start))
 	}
 }

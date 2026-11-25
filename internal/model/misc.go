@@ -144,6 +144,7 @@ type ServiceForm struct {
 	Source      string
 	Branch      string
 	BuildPath   string
+	BuildTarget string
 	Folder      string
 	External    string
 	Port        Port

@@ -3,6 +3,7 @@ package kinds
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,9 +30,22 @@ func (b RepoBuilder) Build(ctx context.Context, req model.BuildRequest, log cont
 	if err != nil {
 		return v, fmt.Errorf("빌드 경로 %q를 찾을 수 없어요 / build path not found: %w", s.BuildPath, err)
 	}
-	ports, found := b.t.Dockerfile.Ports(folder)
+	ports, found := b.t.Dockerfile.Ports(folder, s.BuildTarget)
 	if !found {
 		return v, explain(model.ErrNoDockerfile, "Dockerfile이 없어요. HTML 파일만 있는 저장소라면 '정적 사이트'로 올리세요 / no Dockerfile — for plain HTML use a static site")
+	}
+	stages := b.t.Dockerfile.Stages(folder)
+	switch {
+	case s.BuildTarget != "" && !slices.Contains(stages, s.BuildTarget):
+		return v, fmt.Errorf("빌드 타깃 %q가 Dockerfile에 없어요 — 있는 단계: %s / build target %q is not in the Dockerfile — stages: %s",
+			s.BuildTarget, stageList(stages), s.BuildTarget, stageList(stages))
+	case s.BuildTarget != "":
+		fmt.Fprintf(log, "빌드 타깃: %s / build target: %s\n", s.BuildTarget, s.BuildTarget)
+	case len(stages) > 1:
+		// 단계가 여럿인데 고르지 않았다 — Docker처럼 맨 마지막을 빌드하되, 다른 것이 있다고 말해 둔다
+		fmt.Fprintf(log, "Dockerfile에 단계가 %d개예요 — 맨 마지막(%s)을 빌드해요. 다른 앱이면 서비스 설정의 \"빌드 타깃\"에 적으세요: %s / "+
+			"%d stages — building the last one (%s); set a build target for another: %s\n",
+			len(stages), stages[len(stages)-1], stageList(stages), len(stages), stages[len(stages)-1], stageList(stages))
 	}
 	v.Port = only(ports)
 
@@ -48,7 +62,7 @@ func (b RepoBuilder) Build(ctx context.Context, req model.BuildRequest, log cont
 	}
 	packed := b.t.Packer.Pack(folder, extra)
 	defer packed.Close()
-	v.Image, err = b.t.Builder.Build(ctx, packed, model.ImageTag(s.Name, req.Deployment), log)
+	v.Image, err = b.t.Builder.Build(ctx, packed, model.ImageTag(s.Name, req.Deployment), s.BuildTarget, log)
 	return v, err
 }
 
@@ -98,6 +112,13 @@ func fetchCode(ctx context.Context, t Tools, req model.BuildRequest, log contrac
 	}
 	fmt.Fprintf(log, "%s %s\n", model.Deployment{Commit: c.Hash}.ShortCommit(), c.Message)
 	return dir, giveBack, c, nil
+}
+
+func stageList(stages []string) string {
+	if len(stages) == 0 {
+		return "(이름 있는 단계 없음 / none named)"
+	}
+	return strings.Join(stages, ", ")
 }
 
 // only는 포트가 하나일 때만 그것이다. 여럿이면 어느 것인지 모른다.
@@ -207,8 +228,15 @@ func (w ContainerSwapper) waitReady(ctx context.Context, name string, port model
 	defer cancel()
 	wait := int(w.t.ReadyTimeout.Seconds())
 	for {
-		if st, err := w.t.Watcher.One(ctx, name); err == nil && !st.Running && (st.State == "exited" || st.State == "dead") {
-			return fmt.Errorf("컨테이너가 바로 멈췄어요 (종료 코드 %d) / the container exited (code %d)", st.ExitCode, st.ExitCode)
+		if st, err := w.t.Watcher.One(ctx, name); err == nil {
+			switch {
+			case st.Restarts > 0 || st.State == "restarting":
+				// 앱이 죽고 Docker가 다시 띄우고 있다 — 기다려도 소용없다 (재시작 정책 때문에 "멈춤"으로 보이지 않는다)
+				return fmt.Errorf("앱이 시작하자마자 죽어요 — Docker가 %d번 다시 띄웠어요. 위 출력의 오류를 보세요 / the app dies right after it starts (restarted %d times) — see the output above",
+					max(st.Restarts, 1), max(st.Restarts, 1))
+			case !st.Running && (st.State == "exited" || st.State == "dead"):
+				return fmt.Errorf("컨테이너가 바로 멈췄어요 (종료 코드 %d) / the container exited (code %d)", st.ExitCode, st.ExitCode)
+			}
 		}
 		dctx, dcancel := context.WithTimeout(ctx, 2*time.Second)
 		err := w.t.Ports.Answers(dctx, name, port)

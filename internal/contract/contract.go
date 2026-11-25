@@ -427,7 +427,8 @@ type ServerStats interface {
 
 // ImageBuilder는 빌드할 폴더(묶은 것)로 이미지를 만든다.
 type ImageBuilder interface {
-	Build(ctx context.Context, buildFolder io.Reader, tag string, log io.Writer) (model.ImageID, error)
+	// target은 Dockerfile의 단계 이름(FROM … AS web) — 비면 맨 마지막 단계 (Docker의 기본)
+	Build(ctx context.Context, buildFolder io.Reader, tag, target string, log io.Writer) (model.ImageID, error)
 }
 
 // ImagePuller는 이미지를 받고 그 ID·열어둔 포트를 알려준다.
@@ -482,9 +483,10 @@ type BuildContextPacker interface {
 	Pack(folder string, extra map[string][]byte) io.ReadCloser
 }
 
-// DockerfilePortReader는 Dockerfile의 EXPOSE에서 앱 포트를 찾는다. Dockerfile이 없으면 found가 거짓.
+// DockerfilePortReader는 Dockerfile을 읽는다 — 빌드할 단계가 연 앱 포트(EXPOSE)와 단계 이름들. Dockerfile이 없으면 found가 거짓.
 type DockerfilePortReader interface {
-	Ports(folder string) (ports []model.Port, found bool)
+	Ports(folder, target string) (ports []model.Port, found bool) // target이 비면 맨 마지막 단계. 이어받은 단계(FROM 단계이름)의 EXPOSE도
+	Stages(folder string) []string                                // "FROM … AS 이름"의 이름들, 적힌 순서대로
 }
 
 // SiteFiles는 정적 사이트 파일을 올리고·복사하고·지운다 (숨김 파일 제외).

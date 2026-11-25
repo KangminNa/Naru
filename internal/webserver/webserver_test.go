@@ -293,3 +293,55 @@ func TestSyncKeepsTheWebServerReachingItsTargets(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 }
+
+// Compose: 주소마다 그 대상 서비스로 — 이름:포트(Container 거짓)라 웹서버가 필요하면 그 네트워크에 붙는다. 대상이 없는 주소는 보낼 곳이 없다.
+// 다른 서비스의 경로 연결이 Compose 서비스를 가리키면 첫 대상으로 간다.
+func TestComposeAddressesGoToTheirTargets(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "naru.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	bus := events.NewBus()
+	set := store.NewSettings(db)
+	services, domains, web := store.NewServices(db), store.NewDomains(db), store.NewWebSettings(db)
+	shop, _ := services.Create(ctx, model.NewService{Name: name("shop"), Kind: model.KindCompose, ComposeProject: "shop"})
+	domains.Add(ctx, shop, model.DomainInput{Domain: domain("shop.example.com"), Target: model.DomainTarget{Service: "web", Port: 3000}})
+	domains.Add(ctx, shop, model.DomainInput{Domain: domain("api.example.com"), Target: model.DomainTarget{Service: "server", Port: 8080}})
+	domains.Add(ctx, shop, model.DomainInput{Domain: domain("later.example.com")})
+	blog, _ := services.Create(ctx, model.NewService{Name: name("blog"), Kind: model.KindRepo, Alias: "naru-blog", Port: 3000})
+	domains.Add(ctx, blog, model.DomainInput{Domain: domain("blog.example.com")})
+	prefix, _ := model.ParsePathPrefix("/shop")
+	web.Set(ctx, blog, model.WebSettings{Paths: []model.PathRoute{{Prefix: prefix, Service: shop}}})
+
+	b := NewSiteMapBuilder(Fixed{AdminSocket: "/run/caddy/admin.sock", AdminUpstream: "naru:8080"}, services,
+		kinds.NewLookup(kinds.Tools{}), Settings{settings.NewAdminDomainSetting(model.DomainName{}, set, bus),
+			settings.NewCertEmailSetting(model.Email{}, set, bus), settings.NewSetupProgress(set, bus)}, &fakeCerts{},
+		&fakeClock{now: time.Date(2026, 11, 25, 0, 0, 0, 0, time.UTC)}, web)
+	m, err := b.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	to := map[string]model.Site{}
+	for _, s := range m.Sites {
+		to[s.Hosts[0]] = s
+	}
+	if d := to["shop.example.com"].Destination; d.Address != "shop-web-1:3000" || d.Container {
+		t.Fatalf("%+v", d)
+	}
+	if d := to["api.example.com"].Destination; d.Address != "shop-server-1:8080" {
+		t.Fatalf("%+v", d)
+	}
+	if d := to["later.example.com"].Destination; d.Address != "" {
+		t.Fatalf("no target, nowhere to send: %+v", d)
+	}
+	if p := to["blog.example.com"].Settings.Paths; len(p) != 1 || p[0].Destination.Address != "shop-web-1:3000" {
+		t.Fatalf("%+v", p)
+	}
+	if got := containerTargets(m); strings.Join(got, ",") != "shop-server-1,shop-web-1" {
+		t.Fatalf("the web server makes sure it reaches them: %v", got)
+	}
+	if _, err := (caddy.JSONWriter{}).Write(m); err != nil {
+		t.Fatal(err)
+	}
+}

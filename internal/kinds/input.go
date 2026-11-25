@@ -7,7 +7,14 @@ import "github.com/KangminNa/naru/internal/model"
 // RepoInput은 저장소 서비스의 입력을 본다 — 저장소 주소가 있어야 한다.
 type RepoInput struct{}
 
+// noCompose는 Compose에만 있는 칸을 비운다.
+func noCompose(in model.ServiceInput) model.ServiceInput {
+	in.ComposeFile, in.ComposeProject, in.Target = model.FolderPath{}, model.ProjectName{}, model.DomainTarget{}
+	return in
+}
+
 func (RepoInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
+	in = noCompose(in)
 	if in.Repo.IsZero() {
 		return in, model.InputError{Field: "source", Code: "repo"}
 	}
@@ -22,6 +29,7 @@ func (RepoInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
 type ImageInput struct{}
 
 func (ImageInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
+	in = noCompose(in)
 	if in.Image.IsZero() {
 		return in, model.InputError{Field: "source", Code: "image"}
 	}
@@ -34,6 +42,7 @@ func (ImageInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
 type StaticInput struct{}
 
 func (StaticInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
+	in = noCompose(in)
 	if in.Repo.IsZero() {
 		return in, model.InputError{Field: "source", Code: "repo"}
 	}
@@ -50,12 +59,33 @@ func (StaticInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
 type ExternalInput struct{}
 
 func (ExternalInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
+	in = noCompose(in)
 	if in.External.IsZero() {
 		return in, model.InputError{Field: "upstream", Code: "upstream"}
 	}
 	in.Repo, in.Branch, in.Image = model.RepoURL{}, model.Branch{}, model.ImageRef{}
 	in.Folder, in.BuildPath, in.Port, in.AutoDeploy, in.BuildTarget = model.FolderPath{}, model.FolderPath{}, 0, false, model.BuildTarget{}
 	in.Env, in.EnvFile, in.Volumes, in.Networks = model.EnvVars{}, model.EnvFile{}, model.Volumes{}, model.NetworkNames{}
+	in.EnvFrom, in.TakeOver = model.EnvFrom{}, 0
+	return in, nil
+}
+
+// ComposeInput은 Compose 프로젝트의 입력을 본다 — 저장소 주소가 있어야 하고, 작업 폴더가 설정돼 있어야 한다.
+// 컨테이너 하나에만 있는 칸(이미지·포트·환경 변수·볼륨·다른 네트워크·빌드 경로·타깃)은 compose 파일이 정하므로 비운다. .env 파일은 쓴다.
+type ComposeInput struct{ on bool }
+
+func (c ComposeInput) Check(in model.ServiceInput) (model.ServiceInput, error) {
+	if !c.on {
+		return in, model.InputError{Field: "kind", Code: "composeoff"}
+	}
+	if in.Repo.IsZero() {
+		return in, model.InputError{Field: "source", Code: "repo"}
+	}
+	if in.Branch.IsZero() {
+		in.Branch = model.DefaultBranch()
+	}
+	in.Image, in.External, in.Folder, in.BuildPath, in.BuildTarget = model.ImageRef{}, model.ExternalAddress{}, model.FolderPath{}, model.FolderPath{}, model.BuildTarget{}
+	in.Port, in.Env, in.Volumes, in.Networks = 0, model.EnvVars{}, model.Volumes{}, model.NetworkNames{}
 	in.EnvFrom, in.TakeOver = model.EnvFrom{}, 0
 	return in, nil
 }

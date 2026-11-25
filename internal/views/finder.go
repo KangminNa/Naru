@@ -44,8 +44,12 @@ func (f containerFinder) Others(ctx context.Context) ([]model.OtherContainer, er
 		skip[h] = true
 	}
 	linked := map[string]model.Service{} // 컨테이너 이름 → 그리로 보내는 외부 연결 서비스
+	projects := map[string]bool{}        // Naru가 다루는 compose 프로젝트 — 그 컨테이너들은 "다른 것"이 아니다
 	for _, s := range services {
 		skip[s.Live.CurrentContainer()] = true
+		if s.ComposeProject != "" || s.Live.Alias == s.Project() {
+			projects[s.Project()] = true
+		}
 		if host := externalHost(s.External); host != "" {
 			if _, dup := linked[host]; !dup {
 				linked[host] = s
@@ -61,7 +65,7 @@ func (f containerFinder) Others(ctx context.Context) ([]model.OtherContainer, er
 	}
 	var out []model.OtherContainer
 	for name, st := range all {
-		if skip[name] || st.Service != 0 {
+		if skip[name] || st.Service != 0 || (st.Project != "" && projects[st.Project]) {
 			continue
 		}
 		c := model.OtherContainer{Name: name, Image: st.Image, Running: st.State == "running", Status: st.Status, Ports: st.Ports, Project: st.Project}

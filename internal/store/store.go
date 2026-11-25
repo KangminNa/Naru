@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"net/url"
 	"sort"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -92,23 +93,57 @@ func (d *DB) migrate() error {
 		if err != nil {
 			return err
 		}
-		tx, err := d.sql.Begin()
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(string(body)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migration %s: %w", name, err)
-		}
-		if _, err := tx.Exec(`INSERT INTO schema_migrations (version) VALUES (?)`, name); err != nil {
-			tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
+		if err := d.apply(name, string(body)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// apply는 마이그레이션 하나를 한 트랜잭션으로 돌린다.
+// "naru:rebuild"가 적힌 것(표를 다시 만드는 것)은 SQLite가 권하는 순서대로: 연결 하나에서 외래 키를 끄고,
+// 트랜잭션 안에서 다시 만들고, foreign_key_check가 깨끗해야 커밋하고, 외래 키를 다시 켠다.
+// 끄지 않으면 부모 표를 지울 때 자식 표의 줄이 ON DELETE CASCADE로 함께 지워진다.
+func (d *DB) apply(name, body string) error {
+	ctx := context.Background()
+	conn, err := d.sql.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	rebuild := strings.Contains(body, "naru:rebuild")
+	if rebuild {
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return err
+		}
+		defer conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(body); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("migration %s: %w", name, err)
+	}
+	if rebuild {
+		rows, err := tx.Query(`PRAGMA foreign_key_check`)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		broken := rows.Next()
+		rows.Close()
+		if broken {
+			tx.Rollback()
+			return fmt.Errorf("migration %s: foreign keys broken", name)
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version) VALUES (?)`, name); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }
 
 // ── 서버 설정 ─────────────────────────────

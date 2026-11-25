@@ -11,23 +11,28 @@ import (
 
 // serviceForm은 서비스 추가·설정 폼에서 받은 글자 그대로다. 틀렸을 때 다시 그리는 데 쓴다.
 type serviceForm struct {
-	Kind       string
-	Name       string
-	Source     string
-	Branch     string
-	BuildPath  string
-	Target     string // 빌드 타깃
-	Folder     string
-	Upstream   string
-	Port       string
-	Domain     string
-	Token      string
-	ClearToken bool
-	Env        string
-	EnvFile    string
-	Volumes    string
-	Networks   string
-	AutoDeploy bool
+	Kind      string
+	Name      string
+	Source    string
+	Branch    string
+	BuildPath string
+	Target    string // 빌드 타깃
+	// Compose
+	ComposeFile    string
+	ComposeProject string
+	TargetService  string // 처음 붙이는 주소가 가리킬 서비스·포트
+	TargetPort     string
+	Folder         string
+	Upstream       string
+	Port           string
+	Domain         string
+	Token          string
+	ClearToken     bool
+	Env            string
+	EnvFile        string
+	Volumes        string
+	Networks       string
+	AutoDeploy     bool
 
 	// 돌고 있는 컨테이너를 넘겨받을 때만 (새 서비스 화면)
 	Adopt    string   // 넘겨받을 컨테이너 이름
@@ -37,26 +42,30 @@ type serviceForm struct {
 
 func readServiceForm(r *http.Request) serviceForm {
 	return serviceForm{
-		Kind:       r.FormValue("kind"),
-		Name:       strings.TrimSpace(r.FormValue("name")),
-		Source:     strings.TrimSpace(r.FormValue("source")),
-		Branch:     strings.TrimSpace(r.FormValue("branch")),
-		BuildPath:  strings.TrimSpace(r.FormValue("build_path")),
-		Target:     strings.TrimSpace(r.FormValue("build_target")),
-		Folder:     strings.TrimSpace(r.FormValue("folder")),
-		Upstream:   strings.TrimSpace(r.FormValue("upstream")),
-		Port:       strings.TrimSpace(r.FormValue("port")),
-		Domain:     strings.TrimSpace(r.FormValue("domain")),
-		Token:      strings.TrimSpace(r.FormValue("token")),
-		ClearToken: r.FormValue("clear_token") == "1",
-		Env:        strings.ReplaceAll(r.FormValue("env"), "\r\n", "\n"),
-		EnvFile:    strings.ReplaceAll(r.FormValue("env_file"), "\r\n", "\n"),
-		Volumes:    strings.ReplaceAll(r.FormValue("volumes"), "\r\n", "\n"),
-		Networks:   strings.TrimSpace(r.FormValue("networks")),
-		AutoDeploy: r.FormValue("auto_deploy") == "1",
-		Adopt:      strings.TrimSpace(r.FormValue("adopt")),
-		EnvFrom:    r.Form["env_from"],
-		TakeOver:   r.FormValue("take_over") == "1",
+		Kind:           r.FormValue("kind"),
+		Name:           strings.TrimSpace(r.FormValue("name")),
+		Source:         strings.TrimSpace(r.FormValue("source")),
+		Branch:         strings.TrimSpace(r.FormValue("branch")),
+		BuildPath:      strings.TrimSpace(r.FormValue("build_path")),
+		Target:         strings.TrimSpace(r.FormValue("build_target")),
+		ComposeFile:    strings.TrimSpace(r.FormValue("compose_file")),
+		ComposeProject: strings.TrimSpace(r.FormValue("compose_project")),
+		TargetService:  strings.TrimSpace(r.FormValue("target_service")),
+		TargetPort:     strings.TrimSpace(r.FormValue("target_port")),
+		Folder:         strings.TrimSpace(r.FormValue("folder")),
+		Upstream:       strings.TrimSpace(r.FormValue("upstream")),
+		Port:           strings.TrimSpace(r.FormValue("port")),
+		Domain:         strings.TrimSpace(r.FormValue("domain")),
+		Token:          strings.TrimSpace(r.FormValue("token")),
+		ClearToken:     r.FormValue("clear_token") == "1",
+		Env:            strings.ReplaceAll(r.FormValue("env"), "\r\n", "\n"),
+		EnvFile:        strings.ReplaceAll(r.FormValue("env_file"), "\r\n", "\n"),
+		Volumes:        strings.ReplaceAll(r.FormValue("volumes"), "\r\n", "\n"),
+		Networks:       strings.TrimSpace(r.FormValue("networks")),
+		AutoDeploy:     r.FormValue("auto_deploy") == "1",
+		Adopt:          strings.TrimSpace(r.FormValue("adopt")),
+		EnvFrom:        r.Form["env_from"],
+		TakeOver:       r.FormValue("take_over") == "1",
 	}
 }
 
@@ -68,6 +77,7 @@ func formFrom(f model.ServiceForm) serviceForm {
 	}
 	return serviceForm{
 		Source: f.Source, Branch: f.Branch, BuildPath: f.BuildPath, Target: f.BuildTarget, Folder: f.Folder, Upstream: f.External,
+		ComposeFile: f.ComposeFile, ComposeProject: f.ComposeProject,
 		Port: port, AutoDeploy: f.AutoDeploy, Env: f.EnvText, EnvFile: f.EnvFileText, Volumes: f.Volumes, Networks: f.Networks,
 	}
 }
@@ -102,6 +112,15 @@ func (f serviceForm) input(kind model.KindName) (model.ServiceInput, []model.Env
 		return in, nil, err
 	}
 	if in.BuildTarget, err = model.ParseBuildTarget(f.Target); err != nil {
+		return in, nil, err
+	}
+	if in.ComposeFile, err = model.ParseFolderPath(f.ComposeFile); err != nil {
+		return in, nil, model.InputError{Field: "compose_file", Code: "composefile"}
+	}
+	if in.ComposeProject, err = model.ParseProjectName(f.ComposeProject); err != nil {
+		return in, nil, err
+	}
+	if in.Target, err = model.ParseDomainTarget(f.TargetService, f.TargetPort); err != nil {
 		return in, nil, err
 	}
 	if in.Folder, err = model.ParseFolderPath(f.Folder); err != nil {

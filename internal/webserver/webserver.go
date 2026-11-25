@@ -76,13 +76,23 @@ func (b siteMapBuilder) Build(ctx context.Context) (model.SiteMap, error) {
 	}
 	// 경로별 연결의 목적지를 실제 주소로 바꾸려면 모든 서비스의 목적지를 먼저 알아야 한다
 	destinations := map[model.ServiceID]model.Destination{}
+	finders := map[model.ServiceID]contract.DestinationFinder{}
 	for _, s := range all {
 		if tools, ok := b.kinds.Find(s.Kind); ok {
-			destinations[s.ID] = tools.Destination.Find(s)
+			to := tools.Destination.Find(s)
+			for _, d := range s.Domains { // 서비스 전체로는 보낼 곳이 없으면(Compose) 첫 주소의 대상으로
+				if to.Address != "" || to.Folder != "" {
+					break
+				}
+				if dd := tools.Destination.ForDomain(s, d); dd.Address != "" {
+					to = dd
+				}
+			}
+			destinations[s.ID], finders[s.ID] = to, tools.Destination
 		}
 	}
 	for _, s := range all {
-		to, ok := destinations[s.ID]
+		finder, ok := finders[s.ID]
 		if !ok {
 			continue
 		}
@@ -95,6 +105,7 @@ func (b siteMapBuilder) Build(ctx context.Context) (model.SiteMap, error) {
 			if d.Domain == domain {
 				continue // 관리 주소가 우선
 			}
+			to := finder.ForDomain(s, d) // 주소마다 — Compose는 주소가 가리키는 서비스로
 			m.Sites = append(m.Sites, model.Site{Hosts: []string{d.Domain.String()}, Destination: to, HTTPS: d.HTTPS, HSTS: d.HSTS,
 				RedirectHTTP: d.HTTPS && ready(d.Domain), Settings: settings})
 		}

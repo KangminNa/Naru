@@ -722,3 +722,74 @@ func TestAuditKeepsWhatHappened(t *testing.T) {
 		t.Fatal("never cut in the middle of a character")
 	}
 }
+
+func TestDomainTargetsAndComposeFields(t *testing.T) {
+	db := open(t, t.TempDir())
+	r, domains := NewServices(db), NewDomains(db)
+	id, _ := r.Create(ctx, model.NewService{Name: name("shop"), Kind: model.KindCompose, Source: "https://github.com/me/shop", ComposeFile: "deploy/compose.yml", ComposeProject: "shop2"})
+	dn, _ := model.ParseDomainName("shop.example.com")
+	if err := domains.Add(ctx, id, model.DomainInput{Domain: dn, HTTPS: true, Target: model.DomainTarget{Service: "web", Port: 3000}}); err != nil {
+		t.Fatal(err)
+	}
+	s := must(r.Get(ctx, id))
+	if s.ComposeFile != "deploy/compose.yml" || s.Project() != "shop2" || s.Domains[0].Target != (model.DomainTarget{Service: "web", Port: 3000}) {
+		t.Fatalf("%+v", s)
+	}
+	if err := domains.SetTarget(ctx, id, s.Domains[0].ID, model.DomainTarget{Service: "admin", Port: 8080}); err != nil {
+		t.Fatal(err)
+	}
+	if s := must(r.Get(ctx, id)); s.Domains[0].Target.Service != "admin" || s.Domains[0].Target.Port != 8080 {
+		t.Fatalf("%+v", s.Domains[0])
+	}
+	if err := domains.SetTarget(ctx, id+1, s.Domains[0].ID, model.DomainTarget{}); !errors.Is(err, model.ErrNotFound) {
+		t.Fatal("only its own addresses")
+	}
+	r.Update(ctx, id, model.ServiceSettings{Source: "https://github.com/me/shop", ComposeFile: "compose.yml"})
+	if s := must(r.Get(ctx, id)); s.ComposeFile != "compose.yml" || s.ComposeProject != "shop2" {
+		t.Fatal("the project name never changes with the settings")
+	}
+}
+
+// 종류에 compose를 더하는 마이그레이션은 services 표를 다시 만든다 — 주소·배포 기록·웹서버 설정과 번호가 그대로여야 한다.
+func TestRebuildingServicesKeepsEverythingAttached(t *testing.T) {
+	dir := t.TempDir()
+	db := open(t, dir)
+	r := NewServices(db)
+	r.Create(ctx, model.NewService{Name: name("first"), Kind: model.KindImage, Source: "me/first"})
+	r.Delete(ctx, 1)
+	id, _ := r.Create(ctx, model.NewService{Name: name("blog"), Kind: model.KindRepo, Source: "https://github.com/me/blog"})
+	dn, _ := model.ParseDomainName("blog.example.com")
+	NewDomains(db).Add(ctx, id, model.DomainInput{Domain: dn, HTTPS: true})
+	did, _ := NewDeployments(db).Start(ctx, id, model.ReasonManual)
+	NewWebSettings(db).Set(ctx, id, model.WebSettings{Maintenance: true})
+	NewSecrets(db).Set(ctx, id, model.ServiceSecrets{GitToken: "ghp_x", WebhookSecret: "s"})
+	// 다시 만들기를 한 번 더 돌린다 (처음 열 때 이미 돌았다)
+	if _, err := db.sql.Exec(`DELETE FROM schema_migrations WHERE version = 'migrations/014_kind_compose.sql'`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	db = open(t, dir)
+	r = NewServices(db)
+	s := must(r.Get(ctx, id))
+	if s.ID != 2 || len(s.Domains) != 1 || s.Source != "https://github.com/me/blog" {
+		t.Fatalf("the same number and addresses: %+v", s)
+	}
+	if d, err := NewDeployments(db).Get(ctx, did); err != nil || d.ServiceID != id {
+		t.Fatalf("deploy history stays: %v", err)
+	}
+	if ws, _ := NewWebSettings(db).Get(ctx, id); !ws.Maintenance {
+		t.Fatal("web settings stay")
+	}
+	if sec, _ := NewSecrets(db).Get(ctx, id); sec.GitToken != "ghp_x" {
+		t.Fatal("secrets stay")
+	}
+	next, err := r.Create(ctx, model.NewService{Name: name("shop"), Kind: model.KindCompose, Source: "https://github.com/me/shop"})
+	if err != nil || next != 3 {
+		t.Fatalf("compose is a kind now, numbers keep counting up: %d %v", next, err)
+	}
+	// 외래 키가 다시 켜져 있다 — 지우면 주소가 함께 지워진다
+	r.Delete(ctx, id)
+	if owner, ok := NewDomains(db).FindOwner(ctx, dn); ok {
+		t.Fatalf("cascade is back on: %d", owner)
+	}
+}

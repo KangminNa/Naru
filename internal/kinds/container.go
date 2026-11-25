@@ -224,11 +224,17 @@ func (w ContainerSwapper) archive(ctx context.Context, s model.Service, name str
 // waitReady는 새 컨테이너가 앱 포트로 응답하기를 기다린다. 먼저 죽으면 바로 실패한다.
 // Naru도 같은 네트워크에 있어 컨테이너 이름으로 닿는다.
 func (w ContainerSwapper) waitReady(ctx context.Context, name string, port model.Port) error {
-	ctx, cancel := context.WithTimeout(ctx, w.t.ReadyTimeout)
+	return waitAnswer(ctx, w.t, name, port, w.t.ReadyTimeout)
+}
+
+// waitAnswer는 컨테이너가 그 포트로 응답하기를 기다린다. 먼저 죽거나 Docker가 다시 띄우면 바로 실패한다.
+// Naru도 같은 네트워크(또는 웹서버처럼 붙은 네트워크)에서 컨테이너 이름으로 닿는다.
+func waitAnswer(ctx context.Context, t Tools, name string, port model.Port, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	wait := int(w.t.ReadyTimeout.Seconds())
+	wait := int(timeout.Seconds())
 	for {
-		if st, err := w.t.Watcher.One(ctx, name); err == nil {
+		if st, err := t.Watcher.One(ctx, name); err == nil {
 			switch {
 			case st.Restarts > 0 || st.State == "restarting":
 				// 앱이 죽고 Docker가 다시 띄우고 있다 — 기다려도 소용없다 (재시작 정책 때문에 "멈춤"으로 보이지 않는다)
@@ -239,7 +245,7 @@ func (w ContainerSwapper) waitReady(ctx context.Context, name string, port model
 			}
 		}
 		dctx, dcancel := context.WithTimeout(ctx, 2*time.Second)
-		err := w.t.Ports.Answers(dctx, name, port)
+		err := t.Ports.Answers(dctx, name, port)
 		dcancel()
 		if err == nil {
 			return nil
@@ -247,7 +253,7 @@ func (w ContainerSwapper) waitReady(ctx context.Context, name string, port model
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("%d초 동안 포트 %d에서 응답이 없어요. 앱이 다른 포트를 듣고 있지 않은지 확인하세요 / no answer on port %d after %ds", wait, port, port, wait)
-		case <-time.After(w.t.PollEvery):
+		case <-time.After(t.PollEvery):
 		}
 	}
 }
@@ -276,6 +282,10 @@ func (w ContainerSwapper) older(ctx context.Context, s model.Service, keep strin
 // ContainerAliasDestination은 서비스 별칭:앱 포트다 (Docker 방식 — 웹서버가 같은 네트워크에 있다).
 // 새 컨테이너가 같은 별칭으로 붙으니 배포 때 웹서버 설정이 바뀌지 않는다. 아직 모르면 비어 있다.
 type ContainerAliasDestination struct{}
+
+func (c ContainerAliasDestination) ForDomain(s model.Service, _ model.Domain) model.Destination {
+	return c.Find(s)
+}
 
 func (ContainerAliasDestination) Find(s model.Service) model.Destination {
 	d := model.Destination{Container: true}

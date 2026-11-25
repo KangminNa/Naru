@@ -49,6 +49,8 @@ type Config struct {
 	ProcDir        string // NARU_PROC_DIR, 기본 /proc
 	DockerSocket   string // NARU_DOCKER_SOCKET, 기본 /var/run/docker.sock
 	Buildx         string // 이미지를 만드는 buildx 실행 파일 — 환경 변수 없음, 기본은 Naru 이미지 안의 /usr/local/libexec/naru/buildx
+	Compose        string // docker compose 실행 파일 — 환경 변수 없음, 기본은 Naru 이미지 안의 /usr/local/libexec/naru/compose
+	HostData       string // NARU_HOST_DATA — 데이터 폴더의 서버 절대 경로. Compose 작업 폴더(<이것>/compose)를 서버와 같은 경로로 본다. 비면 Compose를 막는다
 	CaddySocket    string // NARU_CADDY_ADMIN — 웹서버 관리 소켓, 기본 /run/caddy/admin.sock
 	SelfUpstream   string // NARU_SELF_UPSTREAM — 웹서버가 관리 화면에 닿는 주소, 기본 naru:8080
 	InternalTLS    bool   // NARU_TLS=internal — 개발용. 공개 CA 대신 내부 CA로 인증서
@@ -71,6 +73,7 @@ func ConfigFromEnv(version string) Config {
 		DataDir:        envOr("NARU_DATA_DIR", "./data"),
 		ProcDir:        envOr("NARU_PROC_DIR", "/proc"),
 		DockerSocket:   envOr("NARU_DOCKER_SOCKET", "/var/run/docker.sock"),
+		HostData:       os.Getenv("NARU_HOST_DATA"),
 		CaddySocket:    os.Getenv("NARU_CADDY_ADMIN"),
 		SelfUpstream:   os.Getenv("NARU_SELF_UPSTREAM"),
 		InternalTLS:    os.Getenv("NARU_TLS") == "internal",
@@ -121,6 +124,7 @@ func (c Config) resolved() (Config, error) {
 	}
 	fill(&c.Listen, ":8080")
 	fill(&c.Buildx, "/usr/local/libexec/naru/buildx")
+	fill(&c.Compose, "/usr/local/libexec/naru/compose")
 	fill(&c.CaddySocket, "/run/caddy/admin.sock")
 	fill(&c.SelfUpstream, "naru:8080")
 	fill(&c.CaddySites, "/srv/sites")
@@ -172,6 +176,7 @@ type Outside struct {
 	Usage    contract.UsageReader        // 컨테이너 CPU·메모리 (Docker stats)
 	Networks contract.NetworkJoiner      // 웹서버 컨테이너를 다른 네트워크에 붙이고 뗀다
 	Inspect  contract.ContainerInspector // 넘겨받을 컨테이너의 환경 변수·볼륨
+	Compose  contract.ComposeRunner      // docker compose (Compose 종류)
 
 	WatchEvery time.Duration // 지켜보는 간격 (0이면 30초)
 	Clock      contract.Clock
@@ -189,7 +194,8 @@ func RealOutside(cfg Config) Outside {
 		Builder: docker.NewBuildxBuilder(cfg.Buildx, cfg.DockerSocket, filepath.Join(cfg.DataDir, "work", ".buildx")),
 		Puller:  docker.NewPuller(d), Images: docker.NewImages(d),
 		Starter: containers, Remover: containers, Switch: containers, Watcher: containers, AppLogs: containers, Usage: containers, Networks: containers, Inspect: containers,
-		Code: git.Downloader{}, Ports: netcheck.TCP{}, DNS: netcheck.NewDNS(nil),
+		Compose: docker.NewComposeCLI(cfg.Compose, cfg.Buildx, cfg.DockerSocket, filepath.Join(cfg.DataDir, "work", ".compose")),
+		Code:    git.Downloader{}, Ports: netcheck.TCP{}, DNS: netcheck.NewDNS(nil),
 		Stats:   stats.NewProcSampler(cfg.ProcDir, cfg.DataDir),
 		Sender:  caddy.NewSocketSender(cfg.CaddySocket),
 		Certs:   caddy.NewCertificateFiles(cfg.CaddyCerts),
@@ -307,7 +313,8 @@ func (a *App) assemble() error {
 		Work: a.work, Code: out.Code, Secrets: secrets,
 		Dockerfile: files.DockerfileReader{}, Packer: files.TarPacker{}, Builder: out.Builder, Puller: out.Puller,
 		Images: out.Images, Starter: out.Starter, Remover: out.Remover, Switch: out.Switch, Watcher: out.Watcher,
-		Ports: out.Ports, Files: siteFiles, AppLogs: out.AppLogs, Archive: logArchive, Network: cfg.Network, SitesShown: cfg.CaddySites, ReadyTimeout: out.ReadyTimeout,
+		Ports: out.Ports, Files: siteFiles, AppLogs: out.AppLogs, Archive: logArchive, Network: cfg.Network,
+		Compose: out.Compose, Joiner: out.Networks, Projects: files.NewProjectFolders(composeRoot(cfg.HostData)), ComposeOn: cfg.HostData != "" && out.Compose != nil, SitesShown: cfg.CaddySites, ReadyTimeout: out.ReadyTimeout,
 	})
 
 	// G. 웹서버
@@ -330,7 +337,7 @@ func (a *App) assemble() error {
 	a.wait = wait
 	control := deploy.NewServiceControl(deploy.ControlParts{
 		Services: serviceStore, Store: serviceStore, Live: liveStates, Lock: lock, Switch: out.Switch, Remover: out.Remover,
-		Watcher: out.Watcher, Images: out.Images, Files: siteFiles, Past: history, Events: bus, Logs: logArchive,
+		Watcher: out.Watcher, Images: out.Images, Files: siteFiles, Past: history, Events: bus, Logs: logArchive, Kinds: lookup,
 	})
 
 	// C. 서비스
@@ -372,6 +379,7 @@ func (a *App) assemble() error {
 		Admin: adminDomain, Deployer: deployer, Certs: out.Certs, Clock: out.Clock, HTTPSPort: cfg.HTTPSPort, Web: webStore,
 		AppLogs: out.AppLogs, Access: out.Access, Watch: watcher, Archive: logArchive,
 	}, a.log)
+	targets, _ := editor.(contract.TargetEditor) // 주소의 대상을 바꾸는 것도 서비스 편집이 한다
 	monitor := views.NewMonitorViewer(views.MonitorParts{Metrics: metrics, Audit: auditLog, Services: serviceStore, Clock: out.Clock})
 	finder := views.NewContainerFinder(views.FinderParts{
 		Services: serviceStore, Containers: out.Watcher, Inspector: out.Inspect, Hide: []string{cfg.CaddyContainer, selfHost(cfg.SelfUpstream)},
@@ -380,7 +388,7 @@ func (a *App) assemble() error {
 
 	srv, err := web.New(web.Deps{
 		Login: login, Accounts: a.Accounts, SetupKey: a.key, AdminDomain: adminDomain, CertEmail: certEmail, Setup: setup,
-		Launcher: launcher, Editor: editor, Viewer: viewer, Finder: finder, Monitor: monitor, Audit: auditLog, Deployer: deployer, Control: control, Hooks: hooks,
+		Launcher: launcher, Editor: editor, Viewer: viewer, Finder: finder, Monitor: monitor, Audit: auditLog, Targets: targets, Deployer: deployer, Control: control, Hooks: hooks,
 		Stats: out.Stats, WebServer: sync, DNS: out.DNS, Certs: out.Certs, Clock: out.Clock, Log: a.log,
 		WebSettings: webSettings, Nginx: websettings.NginxReader{}, Alerts: alertSettings, DataDir: cfg.DataDir, Version: cfg.Version,
 	})
@@ -453,4 +461,12 @@ func (a *App) printSetupLink() {
 	path := "/setup?token=" + a.key.Value()
 	fmt.Fprintf(os.Stderr, "\n  처음 설정 / First-time setup\n  → http://<이 서버 주소 / this server>%s\n\n", path)
 	a.log.Info("waiting for first-time setup", "setup", path)
+}
+
+// composeRoot는 Compose 작업 폴더들의 뿌리다 — 서버와 Naru 컨테이너에서 같은 경로. 데이터 폴더의 서버 경로를 모르면 비어 있다.
+func composeRoot(hostData string) string {
+	if hostData == "" {
+		return ""
+	}
+	return filepath.Join(hostData, "compose")
 }

@@ -96,6 +96,17 @@
   <ul class="rows">
     {{range .Data.Domains}}{{$d := .Domain}}
     <li><a class="ext" href="http://{{$d.Domain}}" target="_blank" rel="noopener">{{$d.Domain}} ↗</a>
+      {{if $.Data.Compose}}
+      <form method="post" action="/services/{{$id}}/domains/{{$d.ID}}/target" class="target-form">
+        <span class="muted">→</span>
+        <select class="input mono" name="target_service" aria-label="{{t "field.target.service"}}">
+          {{if not $d.Target.Service}}<option value="">{{t "target.none"}}</option>{{end}}
+          {{range $.Data.Compose}}{{if not .Ended}}<option value="{{.Name}}" {{if eq .Name $d.Target.Service}}selected{{end}}>{{.Name}}</option>{{end}}{{end}}
+        </select>
+        <input class="input mono port" name="target_port" value="{{if $d.Target.Port}}{{$d.Target.Port}}{{end}}" inputmode="numeric" placeholder="3000" aria-label="{{t "field.target.port"}}">
+        <button class="btn small" type="submit">{{t "target.save"}}</button>
+      </form>
+      {{end}}
       <span class="spacer"></span>
       {{if $d.HTTPS}}{{template "cert" .Cert}}{{else}}<span class="chip">{{t "service.httponly"}}</span>{{end}}
       {{if $d.HSTS}}<span class="chip on">{{t "service.hsts"}}</span>{{end}}
@@ -107,10 +118,36 @@
   {{else}}<p class="desc">{{t "service.noaddress"}}</p>{{end}}
   <form method="post" action="/services/{{$id}}/domains" class="inline-form">
     <input class="input mono" name="domain" placeholder="app.example.com" aria-label="{{t "field.domain"}}">
+    {{if .Data.Compose}}
+    <span class="muted">→</span>
+    <select class="input mono" name="target_service" aria-label="{{t "field.target.service"}}">
+      {{range .Data.Compose}}{{if not .Ended}}<option value="{{.Name}}">{{.Name}}</option>{{end}}{{end}}
+    </select>
+    <input class="input mono port" name="target_port" inputmode="numeric" placeholder="3000" aria-label="{{t "field.target.port"}}">
+    {{end}}
     <label class="check-label"><input type="checkbox" name="https" value="1" checked> HTTPS</label>
     <button class="btn" type="submit">{{t "service.domain.add"}}</button>
   </form>
+  {{if .Data.Compose}}<p class="desc small">{{t "target.desc"}}</p>{{end}}
 </section>
+
+{{with .Data.Compose}}
+<section class="section" id="compose">
+  <h2>{{t "compose.heading"}}</h2>
+  <p class="desc">{{t "compose.desc"}}</p>
+  <div class="svc-table">
+    <div class="svc-row head"><span>{{t "compose.col.service"}}</span><span>{{t "compose.col.ports"}}</span><span>{{t "compose.col.state"}}</span><span>{{t "compose.col.address"}}</span></div>
+    {{range .}}
+    <div class="svc-row">
+      <span class="mono">{{.Name}}</span>
+      <span class="mono">{{range $i, $p := .Ports}}{{if $i}}, {{end}}{{$p}}{{else}}<span class="muted">—</span>{{end}}</span>
+      <span class="{{if .Ended}}muted{{else if eq .State "running"}}ok-text{{else}}bad-text{{end}}">{{if .Ended}}{{t "compose.ended"}}{{else}}{{.Status}}{{end}}</span>
+      <span>{{if .Domains}}{{t "compose.addressed" .Domains}}{{else}}<span class="muted">—</span>{{end}}</span>
+    </div>
+    {{end}}
+  </div>
+</section>
+{{end}}
 
 <section class="section" id="web">
   <h2>{{t "web.heading"}}</h2>
@@ -160,7 +197,7 @@
   {{if eq .Data.Form "settings"}}{{template "error" .}}{{end}}
   {{$f := .Data.Settings}}
   <form method="post" action="/services/{{$id}}/settings" class="form">
-    {{if eq (print $s.Kind) "repo" "static"}}
+    {{if eq (print $s.Kind) "repo" "static" "compose"}}
     <label class="field"><span>{{t "field.repo"}}</span><input class="input mono" name="source" value="{{$f.Source}}" required></label>
     <label class="field"><span>{{t "service.branch"}}</span><input class="input mono" name="branch" value="{{$f.Branch}}" placeholder="main"></label>
     <label class="field"><span>{{t "field.token"}}</span>
@@ -174,6 +211,13 @@
     {{end}}
     {{if eq (print $s.Kind) "image"}}
     <label class="field"><span>{{t "field.image"}}</span><input class="input mono" name="source" value="{{$f.Source}}" required></label>
+    {{end}}
+    {{if eq (print $s.Kind) "compose"}}
+    <label class="field"><span>{{t "field.composefile"}}</span><input class="input mono" name="compose_file" value="{{$f.ComposeFile}}" placeholder="docker-compose.yml"></label>
+    <label class="field"><span>{{t "field.project"}}</span><input class="input mono" value="{{$f.ComposeProject}}" disabled>
+      <small>{{t "project.fixed"}}</small></label>
+    <label class="field"><span>{{t "field.envfile"}}</span><textarea class="input mono" name="env_file" rows="5">{{$f.EnvFile}}</textarea>
+      <small>{{t "compose.envfile.hint"}}</small></label>
     {{end}}
     {{if eq (print $s.Kind) "static"}}
     <label class="field"><span>{{t "field.folder"}}</span><input class="input mono" name="folder" value="{{$f.Folder}}"></label>

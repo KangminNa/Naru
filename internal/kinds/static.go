@@ -66,6 +66,10 @@ func (FolderSwapper) Retire(context.Context, model.Service, model.LiveState, con
 // FolderDestination은 웹서버 컨테이너에서 본 배포본 폴더다. 아직 배포하지 않았으면 비어 있다.
 type FolderDestination struct{ shown string }
 
+func (f FolderDestination) ForDomain(s model.Service, _ model.Domain) model.Destination {
+	return f.Find(s)
+}
+
 func (f FolderDestination) Find(s model.Service) model.Destination {
 	if s.Live.Release == "" {
 		return model.Destination{}

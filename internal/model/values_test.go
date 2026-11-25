@@ -368,3 +368,38 @@ func TestBuildTarget(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeValues(t *testing.T) {
+	if d, err := ParseDomainTarget(" web ", "3000"); err != nil || d != (DomainTarget{Service: "web", Port: 3000}) {
+		t.Fatalf("%+v %v", d, err)
+	}
+	if d, err := ParseDomainTarget("", "3000"); err != nil || !d.IsZero() {
+		t.Fatal("no service means the service's app")
+	}
+	for _, bad := range [][2]string{{"web", ""}, {"web", "0"}, {"-web", "80"}, {"web app", "80"}, {"web", "70000"}} {
+		if _, err := ParseDomainTarget(bad[0], bad[1]); err == nil {
+			t.Errorf("%v should be refused", bad)
+		}
+	}
+	if p, err := ParseProjectName(" shop2 "); err != nil || p.String() != "shop2" {
+		t.Fatalf("%q %v", p.String(), err)
+	}
+	for _, bad := range []string{"Shop2", "-x", "a b", "a/b"} {
+		if _, err := ParseProjectName(bad); err == nil {
+			t.Errorf("%q should be refused", bad)
+		}
+	}
+	shop, _ := ParseServiceName("shop")
+	if (Service{Name: shop}).Project() != "naru-shop" || (Service{Name: shop, ComposeProject: "shop2"}).Project() != "shop2" {
+		t.Fatal("the project name")
+	}
+	if (ComposeProject{Name: "naru-shop"}).Container("web") != "naru-shop-web-1" {
+		t.Fatal("compose names containers <project>-<service>-1")
+	}
+	if !(ContainerState{State: "exited", Status: "Exited (0) 2 minutes ago"}).Ended() || (ContainerState{State: "exited", Status: "Exited (1) now"}).Ended() {
+		t.Fatal("only a clean exit is a finished one-off")
+	}
+	if !IsCommitHash("a1b2c3d4e5f6") || IsCommitHash("--upload-pack=x") || IsCommitHash("main") {
+		t.Fatal("commit hashes only")
+	}
+}

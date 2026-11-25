@@ -48,6 +48,7 @@ type Deps struct {
 	Viewer      contract.ServiceViewer
 	Finder      contract.ContainerFinder
 	Monitor     contract.MonitorViewer
+	Targets     contract.TargetEditor
 	Audit       contract.AuditLog // 관리자가 한 일을 남긴다 (없으면 남기지 않는다)
 	Deployer    contract.Deployer
 	Control     contract.ServiceControl
@@ -123,6 +124,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /services/{id}/domains", s.addDomain)
 	s.mux.HandleFunc("POST /services/{id}/port", s.setPort)
 	s.mux.HandleFunc("POST /services/{id}/domains/{did}/delete", s.removeDomain)
+	s.mux.HandleFunc("POST /services/{id}/domains/{did}/target", s.setTarget)
 	s.mux.HandleFunc("POST /services/{id}/delete", s.deleteService)
 	s.mux.HandleFunc("POST /services/{id}/web", s.saveWebSettings)
 	s.mux.HandleFunc("POST /services/{id}/web/nginx", s.importNginx)

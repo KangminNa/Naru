@@ -141,19 +141,21 @@ type WebhookView struct {
 
 // ServiceForm은 설정 폼에 미리 채울 값이다. 토큰 원문은 없다.
 type ServiceForm struct {
-	Source      string
-	Branch      string
-	BuildPath   string
-	BuildTarget string
-	Folder      string
-	External    string
-	Port        Port
-	AutoDeploy  bool
-	EnvText     string
-	EnvFileText string
-	Volumes     string
-	Networks    string
-	HasToken    bool
+	Source         string
+	Branch         string
+	BuildPath      string
+	BuildTarget    string
+	Folder         string
+	External       string
+	Port           Port
+	AutoDeploy     bool
+	EnvText        string
+	EnvFileText    string
+	Volumes        string
+	Networks       string
+	HasToken       bool
+	ComposeFile    string
+	ComposeProject string
 }
 
 // DomainView는 서비스 상세의 주소 하나와 그 인증서 상태다.
@@ -176,8 +178,9 @@ type ServiceView struct {
 	Webhook    WebhookView
 	Form       ServiceForm
 	Web        WebSettingsView
-	Findings   []Finding      // 지켜보기가 찾은 이 서비스의 문제
-	Usage      *ResourceUsage // CPU·메모리 (없으면 nil)
+	Findings   []Finding        // 지켜보기가 찾은 이 서비스의 문제
+	Usage      *ResourceUsage   // CPU·메모리 (없으면 nil)
+	Compose    []ComposeService // Compose: 프로젝트가 띄운 서비스들
 }
 
 // StepView는 배포 단계 하나다. State: done · doing · failed

@@ -346,3 +346,14 @@ i.key.in { background: #888780; } i.key.out { background: #7F77DD; }
 .bad-text { color: var(--bad); }
 .desc.small, .small { font-size: 12.5px; }
 
+/* 빌드 방식 · Compose */
+.method { display: grid; gap: 6px; margin: -8px 0 20px; }
+.method-label { font-size: 13px; color: var(--text-2); font-weight: 600; }
+.method small { color: var(--text-3); font-size: 13px; }
+.field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; }
+.field-note { display: block; color: var(--text-3); font-size: 13px; margin-top: -6px; }
+.target-form { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: 10px; }
+.target-form select, .inline-form select { width: auto; min-width: 110px; padding-top: 4px; padding-bottom: 4px; }
+input.port { width: 84px; }
+.ok-text { color: var(--ok); }
+

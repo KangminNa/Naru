@@ -287,8 +287,12 @@ func (s *Server) addDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	domain, err := model.ParseDomainName(r.FormValue("domain"))
+	var target model.DomainTarget
 	if err == nil {
-		err = s.d.Editor.AddDomain(r.Context(), v.Service.ID, model.DomainInput{Domain: domain, HTTPS: r.FormValue("https") == "1"})
+		target, err = model.ParseDomainTarget(r.FormValue("target_service"), r.FormValue("target_port"))
+	}
+	if err == nil {
+		err = s.d.Editor.AddDomain(r.Context(), v.Service.ID, model.DomainInput{Domain: domain, HTTPS: r.FormValue("https") == "1", Target: target})
 	}
 	if err != nil {
 		status := http.StatusBadRequest
@@ -299,6 +303,27 @@ func (s *Server) addDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, r, fmt.Sprintf("/services/%d?ok=domain-added#domains", v.Service.ID))
+}
+
+// setTarget은 주소가 가리킬 서비스·포트를 바꾼다 (Compose).
+func (s *Server) setTarget(w http.ResponseWriter, r *http.Request) {
+	u, _, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	v, ok := s.detailFor(w, r)
+	if !ok {
+		return
+	}
+	t, err := model.ParseDomainTarget(r.FormValue("target_service"), r.FormValue("target_port"))
+	if err == nil {
+		err = s.d.Targets.SetTarget(r.Context(), v.Service.ID, model.DomainID(pathID(r, "did")), t)
+	}
+	if err != nil {
+		s.renderService(w, r, u, v, http.StatusBadRequest, "domain", errKeyOf(err), nil)
+		return
+	}
+	redirect(w, r, fmt.Sprintf("/services/%d?ok=target#domains", v.Service.ID))
 }
 
 func (s *Server) removeDomain(w http.ResponseWriter, r *http.Request) {
@@ -443,13 +468,14 @@ type serviceScreen struct {
 	Domains       []domainRow
 	Settings      serviceForm
 	Web           webForm
-	WebWarnings   []string            // 적용됐지만 알릴 것 (고급 칸에서 버린 지시어)
-	NginxSkipped  []model.SkippedLine // nginx에서 옮기지 못한 줄
-	WebRefused    string              // 웹서버가 거절한 이유 (그 말 그대로)
-	Form          string              // 오류가 난 폼
-	Findings      []finding           // 지켜보기가 찾은 이 서비스의 문제
-	Containers    []string            // 외부 연결 칸 자동완성 (외부 연결 서비스만)
-	Networks      []string            // "다른 네트워크" 칸 자동완성 (컨테이너 서비스만)
+	WebWarnings   []string               // 적용됐지만 알릴 것 (고급 칸에서 버린 지시어)
+	NginxSkipped  []model.SkippedLine    // nginx에서 옮기지 못한 줄
+	WebRefused    string                 // 웹서버가 거절한 이유 (그 말 그대로)
+	Form          string                 // 오류가 난 폼
+	Findings      []finding              // 지켜보기가 찾은 이 서비스의 문제
+	Containers    []string               // 외부 연결 칸 자동완성 (외부 연결 서비스만)
+	Networks      []string               // "다른 네트워크" 칸 자동완성 (컨테이너 서비스만)
+	Compose       []model.ComposeService // Compose: 프로젝트가 띄운 것
 	Usage         *model.ResourceUsage
 }
 
@@ -483,7 +509,7 @@ func (s *Server) serviceView(r *http.Request, u model.Account, sv model.ServiceV
 		Service: sv.Service, Card: cardOf(sc), Target: sv.Target, Container: sv.Container, Deployable: sv.Deployable,
 		Deploys: sv.Deploys, LiveID: sv.LiveID, Running: sv.Deploying, Form: form,
 		WebhookURL: sv.Webhook.URL, WebhookSecret: sv.Webhook.Secret, HasToken: sv.Form.HasToken,
-		Domains: s.domainRows(r, sv.Domains), Web: webFormOf(sv.Web), Usage: sv.Usage,
+		Domains: s.domainRows(r, sv.Domains), Web: webFormOf(sv.Web), Usage: sv.Usage, Compose: sv.Compose,
 	}
 	if sv.Service.External != "" || sv.Container {
 		d.Containers, d.Networks = s.suggestions(r)

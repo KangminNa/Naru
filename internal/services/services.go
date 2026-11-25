@@ -145,6 +145,7 @@ func (e serviceEditor) Create(ctx context.Context, in model.ServiceInput) (model
 	id, err := e.store.Create(ctx, model.NewService{
 		Name: name, Kind: in.Kind, Source: in.Source(), Branch: in.Branch.String(), BuildPath: in.BuildPath.String(), BuildTarget: in.BuildTarget.String(),
 		Folder: in.Folder.String(), External: in.External.String(), Port: in.Port, Networks: in.Networks.String(), AutoDeploy: true, TakesOver: in.TakeOver,
+		ComposeFile: in.ComposeFile.String(), ComposeProject: in.ComposeProject.String(),
 	})
 	if err != nil {
 		return 0, err
@@ -155,7 +156,7 @@ func (e serviceEditor) Create(ctx context.Context, in model.ServiceInput) (model
 		return id, err
 	}
 	if !in.Domain.IsZero() {
-		if err := e.domains.Add(ctx, id, model.DomainInput{Domain: in.Domain, HTTPS: true}); err != nil {
+		if err := e.domains.Add(ctx, id, model.DomainInput{Domain: in.Domain, HTTPS: true, Target: in.Target}); err != nil {
 			return id, err
 		}
 	}
@@ -187,6 +188,7 @@ func (e serviceEditor) Update(ctx context.Context, id model.ServiceID, in model.
 	deployable, container := tools.Builder != nil, tools.Destination.Find(s).Container
 	redeploy := deployable && (in.Source() != s.Source || in.Branch.String() != s.Branch ||
 		in.BuildPath.String() != s.BuildPath || in.BuildTarget.String() != s.BuildTarget || in.Folder.String() != s.Folder || in.Token != "" ||
+		in.ComposeFile.String() != s.ComposeFile ||
 		in.EnvFile.Text() != old.EnvFile.Text())
 	if container && (old.Env.Text() != in.Env.Text() || old.Volumes.Text() != in.Volumes.Text() || in.Networks.String() != s.Networks) {
 		redeploy = true
@@ -199,6 +201,7 @@ func (e serviceEditor) Update(ctx context.Context, id model.ServiceID, in model.
 	if err := e.store.Update(ctx, id, model.ServiceSettings{
 		Source: in.Source(), Branch: in.Branch.String(), BuildPath: in.BuildPath.String(), BuildTarget: in.BuildTarget.String(), Folder: in.Folder.String(),
 		External: in.External.String(), Port: in.Port, Networks: in.Networks.String(), AutoDeploy: auto,
+		ComposeFile: in.ComposeFile.String(),
 	}); err != nil {
 		return false, err
 	}
@@ -230,6 +233,18 @@ func (e serviceEditor) AddDomain(ctx context.Context, id model.ServiceID, d mode
 	return nil
 }
 
+// SetTarget은 주소가 가리킬 대상을 바꾼다 (TargetEditor) — 다시 배포하지 않고 웹서버만 따라간다.
+func (e serviceEditor) SetTarget(ctx context.Context, id model.ServiceID, d model.DomainID, t model.DomainTarget) error {
+	if _, err := e.reader.Get(ctx, id); err != nil {
+		return err
+	}
+	if err := e.domains.SetTarget(ctx, id, d, t); err != nil {
+		return err
+	}
+	e.events.Publish(model.SiteMapChanged{Reason: "domain target"})
+	return nil
+}
+
 func (e serviceEditor) RemoveDomain(ctx context.Context, id model.ServiceID, d model.DomainID) error {
 	if err := e.domains.Remove(ctx, id, d); err != nil {
 		return err
@@ -253,7 +268,7 @@ func (e serviceEditor) SetPort(ctx context.Context, id model.ServiceID, p model.
 	}
 	if err := e.store.Update(ctx, id, model.ServiceSettings{
 		Source: s.Source, Branch: s.Branch, BuildPath: s.BuildPath, BuildTarget: s.BuildTarget, Folder: s.Folder, External: s.External, Port: p,
-		Networks: s.Networks, AutoDeploy: s.AutoDeploy, // 포트만 바꾼다 — 나머지는 그대로 다시 쓴다
+		Networks: s.Networks, AutoDeploy: s.AutoDeploy, ComposeFile: s.ComposeFile, // 포트만 바꾼다 — 나머지는 그대로 다시 쓴다
 	}); err != nil {
 		return err
 	}

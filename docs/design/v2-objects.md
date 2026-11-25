@@ -88,27 +88,31 @@
 | 인터페이스 | 하는 일 | 구현 |
 |---|---|---|
 | `ServiceEditor` | 서비스를 만들고·고치고, 주소를 붙이고 뗀다. 앱 포트만 바꾸기(`SetPort` — 진단의 [포트 바꾸기], 다시 배포하지 않는다) (지우기는 컨테이너·파일까지 함께라 `ServiceControl`) | `serviceEditor` |
+| `TargetEditor` | 주소가 가리킬 대상(Compose의 서비스·포트)을 바꾼다 — 다시 배포하지 않고 웹서버만 따라간다 | `serviceEditor` |
 | `ServiceLauncher` | 서비스를 만들고 첫 배포까지 한 번에 한다 | `serviceLauncher` |
 | `NameChooser` | 이름을 비워 두면 지어 주고, 겹치는지 본다 | `nameChooser` |
 | `DomainChecker` | 주소가 다른 서비스나 관리 화면과 겹치는지 본다 | `domainChecker` |
 
 ### D. 종류마다 다르게 다루기 — `kinds`
 
-종류(저장소·이미지·정적 사이트·외부 연결)마다 다른 것은 **다섯 가지**다. 종류 하나는 이 다섯 담당자의 묶음이다.
+종류(저장소·Compose·이미지·정적 사이트·외부 연결)마다 다른 것은 **여섯 가지**다. 종류 하나는 이 담당자들의 묶음이다.
+화면에서는 "소스(저장소·이미지·이미 떠 있는 것) → 빌드 방식(Dockerfile·Compose·정적 사이트)"으로 보인다 — 저장 형식은 종류 이름 그대로다.
 
-| 인터페이스 | 하는 일 | 저장소 | 이미지 | 정적 사이트 | 외부 연결 |
-|---|---|---|---|---|---|
-| `InputChecker` | 이 종류에 필요한 값이 다 있는지 본다 | `RepoInput` | `ImageInput` | `StaticInput` | `ExternalInput` |
-| `VersionBuilder` | 새 버전을 만든다 | `RepoBuilder` (저장소 → 이미지 빌드) | `ImageFetcher` (이미지 받기) | `StaticBuilder` (폴더 → 배포본) | — |
-| `VersionSwapper` | 새 버전을 띄우고(Swap), 웹서버가 새 것을 가리킨 뒤 옛 것을 내린다(Retire) | `ContainerSwapper` | `ContainerSwapper` | `FolderSwapper` | — |
-| `DestinationFinder` | 웹서버가 요청을 보낼 곳을 알려준다 | `ContainerAliasDestination` (별칭:포트) | 같음 | `FolderDestination` | `ExternalDestination` |
-| `StatusReader` | 화면에 보일 상태를 읽는다 | `ContainerStatus` | `ContainerStatus` | `StaticStatus` | `ExternalStatus` |
+| 인터페이스 | 하는 일 | 저장소(Dockerfile) | Compose | 이미지 | 정적 사이트 | 외부 연결 |
+|---|---|---|---|---|---|---|
+| `InputChecker` | 이 종류에 필요한 값이 다 있는지 본다 | `RepoInput` | `ComposeInput` | `ImageInput` | `StaticInput` | `ExternalInput` |
+| `VersionBuilder` | 새 버전을 만든다 | `RepoBuilder` (저장소 → 이미지 빌드) | `ComposeBuilder` (작업 폴더에 받고 `compose build --pull`) | `ImageFetcher` (이미지 받기) | `StaticBuilder` (폴더 → 배포본) | — |
+| `VersionSwapper` | 새 버전을 띄우고(Swap), 웹서버가 새 것을 가리킨 뒤 옛 것을 내린다(Retire) | `ContainerSwapper` | `ComposeSwapper` (`compose up -d`, 주소 대상을 앱 네트워크에 붙이고 응답 확인, 지난 이미지 지우기) | `ContainerSwapper` | `FolderSwapper` | — |
+| `DestinationFinder` | 웹서버가 요청을 보낼 곳 — 서비스의 앱, 그리고 주소마다 | `ContainerAliasDestination` (별칭:포트) | `ComposeDestination` (주소 대상의 컨테이너:포트) | 같음 | `FolderDestination` | `ExternalDestination` |
+| `StatusReader` | 화면에 보일 상태를 읽는다 | `ContainerStatus` | `ComposeStatus` (프로젝트의 컨테이너 전부) | `ContainerStatus` | `StaticStatus` | `ExternalStatus` |
+| `ServiceRuntime` | 통째로 멈추고·켜고·지운다 (여러 컨테이너인 종류만) | — | `ComposeRuntime` | — | — | — |
 
 | 인터페이스 | 하는 일 | 구현 |
 |---|---|---|
 | `KindLookup` | 종류 이름으로 그 종류의 담당자 묶음(`KindTools`)을 찾아 준다 | `kindLookup` |
 
 **무중단 교체는 `ContainerSwapper` 한 곳에만 있다** — 저장소와 이미지가 함께 쓴다.
+**Compose는 compose 방식 그대로** 바뀐 컨테이너를 다시 만든다 — 배포 때 몇 초 끊길 수 있고, 화면에 그렇게 적는다.
 
 ### E. 배포하기 — `deploy`
 
@@ -183,6 +187,8 @@
 | `AlertSender` | 알림 하나를 그 주소의 형식으로 보낸다 (10초 제한, 응답 본문은 읽고 버린다) | `httppost.AlertPoster` |
 | `SnippetCompiler` | 고급 칸의 Caddyfile 지시어를 웹서버 형식으로 바꾼다 — 그 사이트의 경로 처리만 꺼내고 나머지는 "적용되지 않음"으로 알린다 | `caddy.AdaptCompiler` (Caddy 관리 API `/adapt`) |
 | `ContainerInspector` | 컨테이너 하나의 환경 변수·볼륨·출처 라벨을 읽는다 (값은 비밀 — 화면 계층은 쓰지 않는다) | `docker.Containers` |
+| `ComposeRunner` | Naru 이미지 안의 `docker compose`(`docker/compose-bin`에서 버전 고정)로 build·up·start/stop·down. Naru의 환경 변수는 물려주지 않는다 | `docker.ComposeCLI` |
+| `ProjectFolders` | Compose 작업 폴더 — 서비스마다 하나, 배포 사이에도 남는다. 새 폴더에 받아 `.env`(600)·커밋 표시를 쓰고 바꿔 끼운다 | `files.ProjectFolderSet` |
 | `DomainMover` | 한 서비스의 주소와 웹서버 설정을 다른 서비스로 한 트랜잭션에 옮긴다 | `store.DomainMoves` |
 | `CodeDownloader` | 저장소 코드를 내려받는다 (토큰은 인자·설정 파일에 남기지 않는다) | `git.Downloader` |
 | `WorkFolder` | 잠깐 쓸 작업 폴더를 빌려주고 돌려받는다. 그 안의 경로를 심볼릭 링크로 빠져나가지 않게 찾아 준다 | `files.TempFolders` |
@@ -326,7 +332,10 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `NewService` · `ServiceSettings` | 저장할 새 서비스 · 고칠 수 있는 값 |
 | `Service` | 서비스 하나의 지금 모습 — 비밀은 없다 |
 | `ServiceSecrets` | 배포에만 쓰는 비밀(env·`.env` 파일·볼륨·git 토큰·웹훅 시크릿). **`web`·`cli`는 이 타입을 쓸 수 없다** |
-| `Domain` · `DomainInput` | 서비스에 붙은 주소 하나 · 붙일 주소 |
+| `Domain` · `DomainInput` | 서비스에 붙은 주소 하나 · 붙일 주소 (둘 다 대상 `DomainTarget`을 가진다) |
+| `DomainTarget` | 주소가 가리키는 것 — Compose 서비스 이름과 포트. 비면 서비스의 앱(앱이 하나인 종류) |
+| `ProjectName` | compose 프로젝트 이름(`docker compose -p`) — 영문 소문자·숫자·`-`·`_`. 볼륨·네트워크가 이 이름에 묶인다. 비면 `naru-<서비스>`. `IsCommitHash`는 되돌리기로 받을 커밋 해시 모양을 본다 |
+| `ComposeProject` · `ComposeService` | 배포할 compose 하나(프로젝트 이름 — 기본 `naru-<서비스>`, 작업 폴더, compose 파일) · compose가 띄운 서비스 하나(컨테이너, 상태, 포트, 한 번 돌고 끝나는 것인지) |
 | `Service.Created` · `Service.FromGit` | 서비스를 만든 때 · 소스가 저장소 주소인가(git push 웹훅을 기다린다) — 진단이 "하루가 지나도록 웹훅이 오지 않음"을 보는 데 쓴다 |
 | `LiveState` | 지금 도는 것 — 서비스 별칭, 요청을 받는 컨테이너, 서빙 중인 배포본, 포트, 직접 멈췄는지 |
 | `HookLog` | 웹훅을 마지막으로 받은 때와 결과 |
@@ -532,6 +541,11 @@ type ServiceEditor interface {
 	SetPort(ctx context.Context, id model.ServiceID, p model.Port) error // 앱 포트만 바꾼다 — 다시 배포하지 않고 웹서버만 따라간다
 }
 
+// TargetEditor는 주소가 가리킬 대상(Compose의 서비스·포트)을 바꾼다. 다시 배포하지 않고 웹서버만 따라간다.
+type TargetEditor interface {
+	SetTarget(ctx context.Context, id model.ServiceID, d model.DomainID, t model.DomainTarget) error
+}
+
 // ServiceLauncher는 서비스를 만들고 첫 배포까지 한 번에 한다.
 type ServiceLauncher interface {
 	Launch(ctx context.Context, in model.ServiceInput) (model.ServiceID, model.DeploymentID, error)
@@ -566,6 +580,7 @@ type DomainStore interface {
 	FindOwner(ctx context.Context, d model.DomainName) (model.ServiceID, bool)
 	Add(ctx context.Context, id model.ServiceID, d model.DomainInput) error
 	Remove(ctx context.Context, id model.ServiceID, d model.DomainID) error
+	SetTarget(ctx context.Context, id model.ServiceID, d model.DomainID, t model.DomainTarget) error
 }
 
 // SecretStore는 서비스의 비밀을 저장한다.
@@ -600,7 +615,8 @@ type VersionSwapper interface {
 
 // DestinationFinder는 웹서버가 요청을 보낼 곳을 알려준다.
 type DestinationFinder interface {
-	Find(s model.Service) model.Destination
+	Find(s model.Service) model.Destination                    // 서비스의 앱 — 경로별 연결도 이것을 쓴다
+	ForDomain(s model.Service, d model.Domain) model.Destination // 그 주소가 가리키는 곳 — 앱이 하나인 종류는 Find와 같다
 }
 
 // StatusReader는 화면에 보일 상태를 읽는다.
@@ -615,6 +631,14 @@ type KindTools struct {
 	Swapper     VersionSwapper
 	Destination DestinationFinder
 	Status      StatusReader
+	Runtime     ServiceRuntime // 여러 컨테이너로 도는 종류(Compose)만 — 비면 컨테이너 하나로 멈추고·켜고·지운다
+}
+
+// ServiceRuntime은 여러 컨테이너로 도는 서비스를 통째로 멈추고·켜고·지운다.
+type ServiceRuntime interface {
+	TurnOff(ctx context.Context, s model.Service) error
+	TurnOn(ctx context.Context, s model.Service) error
+	Remove(ctx context.Context, s model.Service) error // 컨테이너·네트워크·작업 폴더 — 데이터 볼륨은 남긴다
 }
 
 // KindLookup은 종류 이름으로 그 종류의 도구 묶음을 찾아 준다.
@@ -933,6 +957,24 @@ type LogArchive interface {
 	List(s model.ServiceName) ([]model.LogArchiveEntry, error) // 최근 것부터
 	Read(s model.ServiceName, d model.DeploymentID) ([]model.LogLine, error)
 	RemoveAll(s model.ServiceName) error
+}
+
+// ComposeRunner는 Naru 이미지 안의 docker compose 실행 파일로 compose 프로젝트 하나를 다룬다.
+type ComposeRunner interface {
+	Build(ctx context.Context, p model.ComposeProject, log io.Writer) error // compose build --pull
+	Up(ctx context.Context, p model.ComposeProject, log io.Writer) error    // compose up -d --remove-orphans
+	Switch(ctx context.Context, p model.ComposeProject, on bool) error      // compose start · stop
+	Down(ctx context.Context, p model.ComposeProject) error                 // 컨테이너·네트워크만 — 볼륨은 남긴다
+}
+
+// ProjectFolders는 Compose 프로젝트의 작업 폴더다 — 서비스마다 하나, 배포 사이에도 남는다 (compose의 상대 경로가 가리킨다).
+// 서버와 Naru 컨테이너에서 같은 경로로 보여야 한다.
+type ProjectFolders interface {
+	Fresh(s model.ServiceName) (string, error)                                         // 코드를 받을 빈 폴더 (같은 디스크)
+	Promote(s model.ServiceName, fresh string, env []byte, c model.Commit) (string, error) // .env(600)·커밋 표시를 쓰고 작업 폴더로 바꿔 끼운다
+	Commit(s model.ServiceName) string                                                  // 지금 작업 폴더의 커밋 (없으면 빈 값)
+	Dir(s model.ServiceName) string                                                     // 작업 폴더 경로
+	Remove(s model.ServiceName) error
 }
 
 // ContainerInspector는 컨테이너 하나의 환경 변수·볼륨·출처를 읽는다. 환경 변수 값은 비밀이다 — web·cli는 쓰지 않는다 (R10).

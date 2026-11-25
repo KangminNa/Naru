@@ -595,3 +595,8 @@ func ParseNetworkNames(text string) (NetworkNames, error) {
 
 func (n NetworkNames) String() string { return n.text }
 func (n NetworkNames) IsZero() bool   { return n.text == "" }
+
+var commitHashPattern = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
+
+// IsCommitHash는 git 커밋 해시 모양인가 — 옵션으로 오해될 수 없다 (되돌리기로 그 커밋을 받을 때).
+func IsCommitHash(s string) bool { return commitHashPattern.MatchString(s) }

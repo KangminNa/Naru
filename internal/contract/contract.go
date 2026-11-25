@@ -108,6 +108,11 @@ type ServiceEditor interface {
 	SetPort(ctx context.Context, id model.ServiceID, p model.Port) error // 앱 포트만 바꾼다 — 다시 배포하지 않고 웹서버만 따라간다
 }
 
+// TargetEditor는 주소가 가리킬 대상(Compose의 서비스·포트)을 바꾼다. 다시 배포하지 않고 웹서버만 따라간다.
+type TargetEditor interface {
+	SetTarget(ctx context.Context, id model.ServiceID, d model.DomainID, t model.DomainTarget) error
+}
+
 // ServiceLauncher는 서비스를 만들고 첫 배포까지 한 번에 한다.
 type ServiceLauncher interface {
 	Launch(ctx context.Context, in model.ServiceInput) (model.ServiceID, model.DeploymentID, error)
@@ -142,6 +147,7 @@ type DomainStore interface {
 	FindOwner(ctx context.Context, d model.DomainName) (model.ServiceID, bool)
 	Add(ctx context.Context, id model.ServiceID, d model.DomainInput) error
 	Remove(ctx context.Context, id model.ServiceID, d model.DomainID) error
+	SetTarget(ctx context.Context, id model.ServiceID, d model.DomainID, t model.DomainTarget) error
 }
 
 // SecretStore는 서비스의 비밀을 저장한다.
@@ -176,7 +182,8 @@ type VersionSwapper interface {
 
 // DestinationFinder는 웹서버가 요청을 보낼 곳을 알려준다.
 type DestinationFinder interface {
-	Find(s model.Service) model.Destination
+	Find(s model.Service) model.Destination                      // 서비스의 앱 — 경로별 연결도 이것을 쓴다
+	ForDomain(s model.Service, d model.Domain) model.Destination // 그 주소가 가리키는 곳 — 앱이 하나인 종류는 Find와 같다
 }
 
 // StatusReader는 화면에 보일 상태를 읽는다.
@@ -191,6 +198,14 @@ type KindTools struct {
 	Swapper     VersionSwapper
 	Destination DestinationFinder
 	Status      StatusReader
+	Runtime     ServiceRuntime // 여러 컨테이너로 도는 종류(Compose)만 — 비면 컨테이너 하나로 멈추고·켜고·지운다
+}
+
+// ServiceRuntime은 여러 컨테이너로 도는 서비스를 통째로 멈추고·켜고·지운다.
+type ServiceRuntime interface {
+	TurnOff(ctx context.Context, s model.Service) error
+	TurnOn(ctx context.Context, s model.Service) error
+	Remove(ctx context.Context, s model.Service) error // 컨테이너·네트워크·작업 폴더 — 데이터 볼륨은 남긴다
 }
 
 // KindLookup은 종류 이름으로 그 종류의 도구 묶음을 찾아 준다.
@@ -509,6 +524,24 @@ type LogArchive interface {
 	List(s model.ServiceName) ([]model.LogArchiveEntry, error) // 최근 것부터
 	Read(s model.ServiceName, d model.DeploymentID) ([]model.LogLine, error)
 	RemoveAll(s model.ServiceName) error
+}
+
+// ComposeRunner는 Naru 이미지 안의 docker compose 실행 파일로 compose 프로젝트 하나를 다룬다.
+type ComposeRunner interface {
+	Build(ctx context.Context, p model.ComposeProject, log io.Writer) error // compose build --pull
+	Up(ctx context.Context, p model.ComposeProject, log io.Writer) error    // compose up -d --remove-orphans
+	Switch(ctx context.Context, p model.ComposeProject, on bool) error      // compose start · stop
+	Down(ctx context.Context, p model.ComposeProject) error                 // 컨테이너·네트워크만 — 볼륨은 남긴다
+}
+
+// ProjectFolders는 Compose 프로젝트의 작업 폴더다 — 서비스마다 하나, 배포 사이에도 남는다 (compose의 상대 경로가 가리킨다).
+// 서버와 Naru 컨테이너에서 같은 경로로 보여야 한다.
+type ProjectFolders interface {
+	Fresh(s model.ServiceName) (string, error)                                             // 코드를 받을 빈 폴더 (같은 디스크)
+	Promote(s model.ServiceName, fresh string, env []byte, c model.Commit) (string, error) // .env(600)·커밋 표시를 쓰고 작업 폴더로 바꿔 끼운다
+	Commit(s model.ServiceName) string                                                     // 지금 작업 폴더의 커밋 (없으면 빈 값)
+	Dir(s model.ServiceName) string                                                        // 작업 폴더 경로
+	Remove(s model.ServiceName) error
 }
 
 // ContainerInspector는 컨테이너 하나의 환경 변수·볼륨·출처를 읽는다. 환경 변수 값은 비밀이다 — web·cli는 쓰지 않는다 (R10).

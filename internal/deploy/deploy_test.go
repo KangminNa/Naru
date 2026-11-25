@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -36,12 +37,29 @@ type fakeDocker struct {
 	exits      func(name string) bool // 시작하자마자 죽는가
 	loops      func(name string) bool // 죽고 Docker가 계속 다시 띄우는가 (재시작 정책)
 	target     string                 // 마지막 빌드의 타깃
+	joined     []string               // "네트워크 컨테이너"
+}
+
+func (f *fakeDocker) NetworksOf(context.Context, string) ([]model.DockerNetwork, error) {
+	return nil, nil
+}
+func (f *fakeDocker) Leave(context.Context, string, string) error { return nil }
+func (f *fakeDocker) Join(_ context.Context, network, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.containers[name]; !ok {
+		return errors.New("no such container")
+	}
+	f.joined = append(f.joined, network+" "+name)
+	return nil
 }
 
 type fakeContainer struct {
 	spec    model.ContainerSpec
 	running bool
 	exited  bool
+	// compose가 띄운 것만
+	project, service, image string
 }
 
 func newFakeDocker() *fakeDocker {
@@ -134,8 +152,18 @@ func (f *fakeDocker) TurnOn(_ context.Context, name string) error {
 	return nil
 }
 
+// All은 compose가 띄운 컨테이너만 보여 준다 (다른 테스트는 All을 쓰지 않는다).
 func (f *fakeDocker) All(context.Context) (model.ContainerStates, error) {
-	return model.ContainerStates{}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := model.ContainerStates{}
+	for n, c := range f.containers {
+		if c.project != "" {
+			out[n] = model.ContainerState{Name: n, Running: c.running, State: map[bool]string{true: "running", false: "exited"}[c.running],
+				Project: c.project, ComposeService: c.service, ImageID: c.image}
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeDocker) One(_ context.Context, name string) (model.ContainerState, error) {
@@ -218,9 +246,15 @@ func (s *fakeSync) Status() model.WebServerStatus { return model.WebServerStatus
 type fakeGit struct {
 	files  map[string]string
 	commit model.Commit
+	asked  []string // 정해서 받은 커밋 (되돌리기)
 }
 
-func (g *fakeGit) Download(_ context.Context, _ model.CodeSource, into string, _ io.Writer) (model.Commit, error) {
+func (g *fakeGit) Download(_ context.Context, from model.CodeSource, into string, _ io.Writer) (model.Commit, error) {
+	if from.Commit != "" {
+		g.asked = append(g.asked, from.Commit)
+		os.MkdirAll(into, 0o755)
+		return model.Commit{Hash: from.Commit, Message: "old"}, nil
+	}
 	os.MkdirAll(into, 0o755)
 	for name, body := range g.files {
 		p := filepath.Join(into, filepath.FromSlash(name))
@@ -244,6 +278,8 @@ type rig struct {
 	changes  int
 	sync     *fakeSync
 	logs     files.LogArchives
+	compose  *fakeCompose
+	projects files.ProjectFolderSet
 }
 
 func newRig(t *testing.T) *rig {
@@ -266,7 +302,10 @@ func newRig(t *testing.T) *rig {
 	siteFiles := files.NewSiteFolders(r.sites)
 	r.logs = files.NewLogArchives(filepath.Join(dir, "logs"))
 	secrets := store.NewSecrets(db)
+	r.projects = files.NewProjectFolders(filepath.Join(dir, "compose"))
+	r.compose = &fakeCompose{docker: r.docker, projects: r.projects}
 	lookup := kinds.NewLookup(kinds.Tools{
+		Compose: r.compose, Joiner: r.docker, Projects: r.projects, ComposeOn: true, ComposeTimeout: 300 * time.Millisecond,
 		Work: files.NewTempFolders(filepath.Join(dir, "work")), Code: r.git, Secrets: secrets,
 		Dockerfile: files.DockerfileReader{}, Packer: files.TarPacker{}, Builder: r.docker, Puller: r.docker, Images: r.docker,
 		Starter: r.docker, Remover: r.docker, Switch: r.docker, Watcher: r.docker, Ports: r.docker, Files: siteFiles,
@@ -281,7 +320,7 @@ func newRig(t *testing.T) *rig {
 	})
 	r.control = NewServiceControl(ControlParts{
 		Services: r.services, Store: r.services, Live: store.NewLiveStates(db), Lock: lock, Switch: r.docker, Remover: r.docker,
-		Watcher: r.docker, Images: r.docker, Files: siteFiles, Past: r.history, Events: bus, Logs: r.logs,
+		Watcher: r.docker, Images: r.docker, Files: siteFiles, Past: r.history, Events: bus, Logs: r.logs, Kinds: lookup,
 	})
 	return r
 }
@@ -783,5 +822,137 @@ func TestIfTheWebServerCannotSwitchBothVersionsStay(t *testing.T) {
 	third := r.deploy(id)
 	if names := r.docker.names(); len(names) != 1 || names[0] != fmt.Sprintf("naru-app-%d", third.ID) {
 		t.Fatalf("the next deploy cleans up everything older: %v", names)
+	}
+}
+
+// fakeCompose는 docker compose다. up은 services를 <프로젝트>-<서비스>-1로 (다시) 띄운다 — 이미지는 빌드마다 바뀐다.
+type fakeCompose struct {
+	docker   *fakeDocker
+	projects files.ProjectFolderSet
+	services []string
+	builds   int
+	calls    []string // "build <폴더의 커밋>", "up", "stop", "start", "down"
+}
+
+func (f *fakeCompose) Build(_ context.Context, p model.ComposeProject, log io.Writer) error {
+	f.builds++
+	body, _ := os.ReadFile(filepath.Join(p.Dir, ".naru-commit"))
+	f.calls = append(f.calls, "build "+strings.TrimSpace(string(body)))
+	fmt.Fprintln(log, "Built")
+	return nil
+}
+
+func (f *fakeCompose) Up(_ context.Context, p model.ComposeProject, log io.Writer) error {
+	f.calls = append(f.calls, "up")
+	f.docker.mu.Lock()
+	defer f.docker.mu.Unlock()
+	for _, svc := range f.services {
+		f.docker.containers[p.Container(svc)] = &fakeContainer{running: true, project: p.Name, service: svc,
+			image: fmt.Sprintf("sha256:%s-%d", svc, f.builds)}
+	}
+	return nil
+}
+
+func (f *fakeCompose) Switch(_ context.Context, p model.ComposeProject, on bool) error {
+	f.calls = append(f.calls, map[bool]string{true: "start", false: "stop"}[on])
+	f.docker.mu.Lock()
+	defer f.docker.mu.Unlock()
+	for _, c := range f.docker.containers {
+		if c.project == p.Name {
+			c.running = on
+		}
+	}
+	return nil
+}
+
+func (f *fakeCompose) Down(_ context.Context, p model.ComposeProject) error {
+	f.calls = append(f.calls, "down")
+	f.docker.mu.Lock()
+	defer f.docker.mu.Unlock()
+	for n, c := range f.docker.containers {
+		if c.project == p.Name {
+			delete(f.docker.containers, n)
+		}
+	}
+	return nil
+}
+
+// Compose: 통째로 빌드하고 띄운 뒤, 주소가 가리키는 web:3000이 응답하면 성공이다. 나머지(worker)는 밖으로 나가지 않는다.
+func TestComposeDeploysTheWholeFileAndWaitsForTheAddressedService(t *testing.T) {
+	r := newRig(t)
+	r.compose.services = []string{"web", "worker"}
+	id := r.create(model.NewService{Name: name("shop"), Kind: model.KindCompose, Source: "https://github.com/me/shop", Branch: "main"}, "")
+	ef, _ := model.ParseEnvFile("DB_PASSWORD=pw\n")
+	store.NewSecrets(r.db).Set(ctx, id, model.ServiceSecrets{EnvFile: ef})
+	dn, _ := model.ParseDomainName("shop.example.com")
+	store.NewDomains(r.db).Add(ctx, id, model.DomainInput{Domain: dn, HTTPS: true, Target: model.DomainTarget{Service: "web", Port: 3000}})
+
+	first := r.deploy(id)
+	if first.Status != model.DeploySuccess || !strings.Contains(first.Log, "web:3000 응답함") || !strings.Contains(first.Log, ".env 파일 1줄") {
+		t.Fatalf("%+v\n%s", first, first.Log)
+	}
+	s := r.get(id)
+	if s.Live.Alias != "naru-shop" || s.Live.Instance != "naru-shop-web-1" || s.Live.Port != 3000 {
+		t.Fatalf("the addressed service is the face of it: %+v", s.Live)
+	}
+	dir := r.projects.Dir(s.Name)
+	if info, err := os.Stat(filepath.Join(dir, ".env")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf(".env sits in the work folder, owner-only: %v", err)
+	}
+	if strings.Join(r.compose.calls, ",") != "build a1b2c3d4e5f6,up" {
+		t.Fatalf("%v", r.compose.calls)
+	}
+	if strings.Join(r.docker.joined, ",") != "naru-net naru-shop-web-1" {
+		t.Fatalf("only the addressed service joins the app network: %v", r.docker.joined)
+	}
+
+	// 다시 배포 — 새 이미지로 바뀐 것의 지난 이미지는 지운다
+	r.git.commit = model.Commit{Hash: "b2c3d4e5f6a7", Message: "feat"}
+	second := r.deploy(id)
+	if second.Status != model.DeploySuccess {
+		t.Fatal(second.Log)
+	}
+	if !slices.Contains(r.docker.removedImg, "sha256:web-1") || !slices.Contains(r.docker.removedImg, "sha256:worker-1") {
+		t.Fatalf("old images go: %v", r.docker.removedImg)
+	}
+
+	// 되돌리기 — 작업 폴더가 다른 커밋이면 그 커밋을 다시 받아 빌드한다
+	r.compose.calls = nil
+	did, err := r.d.RollBack(ctx, id, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.wait()
+	back, _ := r.history.Get(ctx, did)
+	if back.Status != model.DeploySuccess || back.Commit != "a1b2c3d4e5f6" || len(r.git.asked) != 1 || r.git.asked[0] != "a1b2c3d4e5f6" {
+		t.Fatalf("%+v %v\n%s", back, r.git.asked, back.Log)
+	}
+	if strings.Join(r.compose.calls, ",") != "build a1b2c3d4e5f6,up" {
+		t.Fatalf("%v", r.compose.calls)
+	}
+
+	// 주소 대상이 응답하지 않으면 실패하고 그 출력을 보여 준다
+	r.docker.listens = func(n string) bool { return n != "naru-shop-web-1" }
+	bad := r.deploy(id)
+	if bad.Status != model.DeployFailed || !strings.Contains(bad.Log, "web:3000") || !strings.Contains(bad.Log, "Cannot find module") {
+		t.Fatalf("%s", bad.Log)
+	}
+	r.docker.listens = nil
+
+	// 멈추기·켜기·지우기는 프로젝트를 통째로 — 볼륨은 compose down이 남긴다(-v 없음)
+	if err := r.control.Stop(ctx, id); err != nil || !r.get(id).Live.Stopped || r.docker.containers["naru-shop-worker-1"].running {
+		t.Fatalf("stop: %v", err)
+	}
+	if err := r.control.Start(ctx, id); err != nil || r.get(id).Live.Stopped || !r.docker.containers["naru-shop-worker-1"].running {
+		t.Fatalf("start: %v", err)
+	}
+	if err := r.control.Remove(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.docker.names()) != 0 || r.compose.calls[len(r.compose.calls)-1] != "down" {
+		t.Fatalf("down: %v %v", r.docker.names(), r.compose.calls)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatal("the work folder goes")
 	}
 }

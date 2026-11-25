@@ -47,6 +47,7 @@ type Container struct {
 
 	Labels   map[string]string
 	Networks []string // 붙은 네트워크 이름 (이름순)
+	ImageID  string
 }
 
 // Ping은 Docker에 닿는가.
@@ -58,11 +59,12 @@ func (c *Client) containers(ctx context.Context) (map[string]Container, error) {
 	}
 	defer res.Body.Close()
 	var raw []struct {
-		Names  []string
-		Image  string
-		State  string
-		Status string
-		Ports  []struct {
+		Names   []string
+		Image   string
+		ImageID string
+		State   string
+		Status  string
+		Ports   []struct {
 			PrivatePort int
 			Type        string
 		}
@@ -89,7 +91,7 @@ func (c *Client) containers(ctx context.Context) (map[string]Container, error) {
 				nets = append(nets, n)
 			}
 			slices.Sort(nets)
-			out[name] = Container{Name: name, Image: r.Image, State: State(r.State), Status: r.Status, Ports: ports, Labels: r.Labels, Networks: nets}
+			out[name] = Container{Name: name, Image: r.Image, State: State(r.State), Status: r.Status, Ports: ports, Labels: r.Labels, Networks: nets, ImageID: r.ImageID}
 		}
 	}
 	return out, nil

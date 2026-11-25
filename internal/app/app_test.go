@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KangminNa/naru/internal/contract"
 	"github.com/KangminNa/naru/internal/model"
 	"github.com/KangminNa/naru/internal/netcheck"
 	"github.com/KangminNa/naru/internal/store"
@@ -299,6 +300,7 @@ func newHarness(t *testing.T, envDomain string) *harness {
 
 type harnessOpts struct {
 	envDomain  string
+	compose    bool          // NARU_HOST_DATA를 정하고 가짜 docker compose를 붙인다
 	watchEvery time.Duration // 0이 아니면 지켜보기 고리를 이 간격으로 돌린다
 }
 
@@ -316,7 +318,13 @@ func newHarnessWith(t *testing.T, o harnessOpts) *harness {
 	}
 	h := &harness{t: t, docker: &fakeDocker{states: model.ContainerStates{}}, caddy: &fakeCaddy{}, certs: &fakeCerts{}}
 	cfg := Config{DataDir: t.TempDir(), Network: "naru-net", AdminDomain: envDomain, Version: "test"}
+	var compose contract.ComposeRunner
+	if o.compose {
+		cfg.HostData = t.TempDir()
+		compose = &fakeCompose{docker: h.docker}
+	}
 	a, err := OpenWith(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), Outside{
+		Compose: compose,
 		Builder: fakeRegistry{}, Puller: fakeRegistry{}, Images: fakeImages{},
 		Starter: h.docker, Remover: h.docker, Switch: h.docker, Watcher: h.docker, Ports: h.docker, AppLogs: h.docker, Usage: h.docker, Networks: h.docker, Inspect: h.docker,
 		Code: fakeGit{}, DNS: netcheck.NewDNS(lookup), Stats: fakeStats{}, Sender: h.caddy, Certs: h.certs, Snippet: fakeSnippet{},
@@ -2035,5 +2043,98 @@ func TestOpeningForAShellCommandLeavesTheRunningServerAlone(t *testing.T) {
 	}
 	if d, _ := store.NewDeployments(shell.db).Get(ctx, did); d.Status != model.DeployRunning {
 		t.Fatal("a shell command must not close the server's running deploys")
+	}
+}
+
+// fakeCompose는 docker compose다 — up하면 web(3000)·worker와 끝난 migrate가 떠 있다.
+type fakeCompose struct{ docker *fakeDocker }
+
+func (fakeCompose) Build(_ context.Context, p model.ComposeProject, _ io.Writer) error {
+	if _, err := os.Stat(filepath.Join(p.Dir, "Dockerfile")); err != nil {
+		return errors.New("the code is in the work folder")
+	}
+	return nil
+}
+
+func (f *fakeCompose) Up(_ context.Context, p model.ComposeProject, _ io.Writer) error {
+	for svc, st := range map[string]model.ContainerState{
+		"web":     {State: "running", Running: true, Status: "Up 1 second", Ports: []model.Port{3000}},
+		"worker":  {State: "running", Running: true, Status: "Up 1 second"},
+		"migrate": {State: "exited", Status: "Exited (0) 2 seconds ago"},
+	} {
+		st.Name, st.Project, st.ComposeService = p.Container(svc), p.Name, svc
+		f.docker.set(st.Name, st)
+	}
+	return nil
+}
+func (fakeCompose) Switch(context.Context, model.ComposeProject, bool) error { return nil }
+func (fakeCompose) Down(context.Context, model.ComposeProject) error         { return nil }
+
+// Compose: 화면에서 만들고, 주소는 web:3000으로만 나간다. 다른 컨테이너 목록에는 Naru가 띄운 compose가 안 보인다.
+func TestComposeFromTheScreen(t *testing.T) {
+	h := newHarnessWith(t, harnessOpts{compose: true})
+	h.signedIn()
+	_, _, page := h.get("/services/new?kind=compose")
+	if !strings.Contains(page, `name="compose_project"`) || !strings.Contains(page, `name="target_service"`) {
+		t.Fatal("the compose form")
+	}
+	code, loc, body := h.post("/services/new", url.Values{"kind": {"compose"}, "source": {"https://github.com/me/shop"},
+		"domain": {"shop.example.com"}, "target_service": {"web"}, "target_port": {"3000"}, "compose_project": {"shop"},
+		"env_file": {"DB_PASSWORD=pw"}})
+	if code != http.StatusSeeOther || !strings.HasPrefix(loc, "/services/1/deploys/") {
+		t.Fatalf("%d %q %s", code, loc, body)
+	}
+	s := h.service(1)
+	if s.Kind != model.KindCompose || s.Project() != "shop" || s.Domains[0].Target != (model.DomainTarget{Service: "web", Port: 3000}) {
+		t.Fatalf("%+v", s)
+	}
+	h.waitFor("the address goes to web:3000 only", func(cfg string) bool {
+		return strings.Contains(cfg, "shop.example.com") && strings.Contains(cfg, "shop-web-1:3000")
+	})
+	if strings.Contains(h.caddy.last(), "shop-worker-1") {
+		t.Fatal("the worker is not public")
+	}
+	if j := strings.Join(h.docker.joined(), ","); !strings.Contains(j, "naru-net<-shop-web-1") || strings.Contains(j, "worker") {
+		t.Fatalf("only the addressed service joins the app network: %s", j)
+	}
+	if b, err := os.ReadFile(filepath.Join(h.app.cfg.HostData, "compose", "shop", ".env")); err != nil || string(b) != "DB_PASSWORD=pw\n" {
+		t.Fatalf(".env in the work folder: %q %v", b, err)
+	}
+
+	_, _, page = h.get("/services/1")
+	for _, want := range []string{"compose가 띄운 것", `<span class="mono">worker</span>`, "끝남 (0)", `action="/services/1/domains/`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("service page shows %q", want)
+		}
+	}
+	deps, _ := h.history().Recent(ctx, 1, 1)
+	dep, _ := h.history().Get(ctx, deps[0].ID)
+	if dep.Status != model.DeploySuccess || strings.Contains(dep.Log, "DB_PASSWORD") || !strings.Contains(dep.Log, ".env 파일 1줄") {
+		t.Fatalf("the deploy log counts the .env lines, never shows them:\n%s", dep.Log)
+	}
+	_, _, home := h.get("/")
+	if strings.Contains(home, "shop-worker-1") {
+		t.Fatal("a compose project Naru runs is not an 'other container'")
+	}
+
+	// 주소의 대상을 바꾼다
+	code, loc, _ = h.post(fmt.Sprintf("/services/1/domains/%d/target", s.Domains[0].ID), url.Values{"target_service": {"web"}, "target_port": {"3001"}})
+	if code != http.StatusSeeOther || !strings.Contains(loc, "ok=target") {
+		t.Fatalf("%d %q", code, loc)
+	}
+	h.waitFor("the new target port", func(cfg string) bool { return strings.Contains(cfg, "shop-web-1:3001") })
+	code, _, body = h.post(fmt.Sprintf("/services/1/domains/%d/target", s.Domains[0].ID), url.Values{"target_service": {"web"}, "target_port": {""}})
+	if code != http.StatusBadRequest || !strings.Contains(body, "compose의 서비스 이름") {
+		t.Fatalf("%d", code)
+	}
+}
+
+// NARU_HOST_DATA가 없으면 Compose는 만들 수 없다 — compose의 상대 경로를 서버에서 찾지 못한다.
+func TestComposeNeedsTheHostDataPath(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	code, _, body := h.post("/services/new", url.Values{"kind": {"compose"}, "source": {"https://github.com/me/shop"}})
+	if code != http.StatusBadRequest || !strings.Contains(body, "NARU_HOST_DATA") {
+		t.Fatalf("%d", code)
 	}
 }

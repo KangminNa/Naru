@@ -168,6 +168,7 @@ var auditActions = map[string]string{
 	"POST /services/{id}/settings":             "service.settings",
 	"POST /services/{id}/domains":              "service.domain.add",
 	"POST /services/{id}/domains/{did}/delete": "service.domain.remove",
+	"POST /services/{id}/domains/{did}/target": "service.domain.target",
 	"POST /services/{id}/port":                 "service.port",
 	"POST /services/{id}/web":                  "service.web",
 	"POST /services/{id}/delete":               "service.delete",

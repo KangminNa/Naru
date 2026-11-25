@@ -5,14 +5,23 @@
 <a class="back" href="/">← {{t "service.back"}}</a>
 <div class="hero"><div><h1>{{t "new.heading"}}</h1><p>{{t "new.sub"}}</p></div></div>
 
+{{$fromRepo := or (eq $f.Kind "repo") (eq $f.Kind "compose") (eq $f.Kind "static")}}
 <div class="kinds">
-  {{range .Data.Kinds}}
-  <a class="kind{{if eq . $f.Kind}} on{{end}}" href="/services/new?kind={{.}}">
-    <b>{{t (print "kind." .)}}{{if eq . "static"}} <span class="new-tag">NEW</span>{{end}}</b>
-    <span>{{t (print "kind." . ".desc")}}</span>
-  </a>
-  {{end}}
+  <a class="kind{{if $fromRepo}} on{{end}}" href="/services/new?kind=repo"><b>{{t "source.repo"}}</b><span>{{t "source.repo.desc"}}</span></a>
+  <a class="kind{{if eq $f.Kind "image"}} on{{end}}" href="/services/new?kind=image"><b>{{t "kind.image"}}</b><span>{{t "kind.image.desc"}}</span></a>
+  <a class="kind{{if eq $f.Kind "external"}} on{{end}}" href="/services/new?kind=external"><b>{{t "kind.external"}}</b><span>{{t "kind.external.desc"}}</span></a>
 </div>
+{{if $fromRepo}}
+<div class="method">
+  <span class="method-label">{{t "build.method"}}</span>
+  <div class="seg" role="group" aria-label="{{t "build.method"}}">
+    <a href="/services/new?kind=repo" {{if eq $f.Kind "repo"}}aria-current="true"{{end}}>Dockerfile</a>
+    <a href="/services/new?kind=compose" {{if eq $f.Kind "compose"}}aria-current="true"{{end}}>Compose</a>
+    <a href="/services/new?kind=static" {{if eq $f.Kind "static"}}aria-current="true"{{end}}>{{t "kind.static"}}</a>
+  </div>
+  <small>{{t (print "kind." $f.Kind ".desc")}}</small>
+</div>
+{{end}}
 
 {{if $f.Kind}}
 <section class="section narrow-form">
@@ -24,10 +33,10 @@
     <p class="flash ok" role="status">{{t "adopt.lead" $a.Seed.Name}}</p>
     {{end}}
 
-    {{if eq $f.Kind "repo" "static"}}
+    {{if eq $f.Kind "repo" "static" "compose"}}
     <label class="field"><span>{{t "field.repo"}}</span>
       <input class="input mono" name="source" value="{{$f.Source}}" placeholder="https://github.com/me/app" required autofocus>
-      <small>{{if eq $f.Kind "repo"}}{{t "new.repo.hint"}}{{else}}{{t "new.static.hint"}}{{end}}{{if and $a (eq $f.Kind "repo")}}{{with $a.Seed.Repo}} {{t "adopt.repo.label"}} <span class="mono">{{.}}</span>{{end}}{{end}}</small></label>
+      <small>{{if eq $f.Kind "repo" "compose"}}{{t "new.repo.hint"}}{{else}}{{t "new.static.hint"}}{{end}}{{if and $a (eq $f.Kind "repo")}}{{with $a.Seed.Repo}} {{t "adopt.repo.label"}} <span class="mono">{{.}}</span>{{end}}{{end}}</small></label>
     {{end}}
     {{if eq $f.Kind "image"}}
     <label class="field"><span>{{t "field.image"}}</span>
@@ -40,6 +49,19 @@
       {{with $.Data.Containers}}<datalist id="naru-containers">{{range .}}<option value="{{.}}">{{end}}</datalist>{{end}}
       <small>{{t "new.external.hint"}}</small></label>
     {{end}}
+    {{if eq $f.Kind "compose"}}
+    <div class="field-row">
+      <label class="field"><span>{{t "field.composefile"}}</span>
+        <input class="input mono" name="compose_file" value="{{$f.ComposeFile}}" placeholder="docker-compose.yml">
+        <small>{{t "composefile.hint"}}</small></label>
+      <label class="field"><span>{{t "field.project"}}</span>
+        <input class="input mono" name="compose_project" value="{{$f.ComposeProject}}" placeholder="naru-{{if $f.Name}}{{$f.Name}}{{else}}…{{end}}">
+        <small>{{t "project.hint"}}</small></label>
+    </div>
+    <label class="field"><span>{{t "field.envfile"}}</span>
+      <textarea class="input mono" name="env_file" rows="4" placeholder="DB_PASSWORD=…">{{$f.EnvFile}}</textarea>
+      <small>{{t "compose.envfile.hint"}}</small></label>
+    {{end}}
     {{if eq $f.Kind "static"}}
     <label class="field"><span>{{t "field.folder"}}</span>
       <input class="input mono" name="folder" value="{{$f.Folder}}" placeholder="dist">
@@ -49,6 +71,16 @@
     <label class="field"><span>{{t "field.domain"}}</span>
       <input class="input mono" name="domain" value="{{$f.Domain}}" placeholder="app.example.com">
       <small>{{t "new.domain.hint"}}</small></label>
+    {{if eq $f.Kind "compose"}}
+    <div class="field-row">
+      <label class="field"><span>{{t "field.target.service"}}</span>
+        <input class="input mono" name="target_service" value="{{$f.TargetService}}" placeholder="web"></label>
+      <label class="field"><span>{{t "field.target.port"}}</span>
+        <input class="input mono" name="target_port" value="{{$f.TargetPort}}" inputmode="numeric" placeholder="3000"></label>
+    </div>
+    <small class="field-note">{{t "target.hint"}}</small>
+    <p class="flash warn">{{t "compose.downtime"}}</p>
+    {{end}}
     {{if eq $f.Kind "repo" "image"}}
     <label class="field"><span>{{t "field.env"}}</span>
       <textarea class="input mono" name="env" rows="4" placeholder="DATABASE_URL=postgres://…&#10;NODE_ENV=production">{{$f.Env}}</textarea>
@@ -86,7 +118,7 @@
         <label class="field"><span>{{t "field.name"}}</span>
           <input class="input mono" name="name" value="{{$f.Name}}" placeholder="{{t "new.name.placeholder"}}">
           <small>{{t "new.name.hint"}}</small></label>
-        {{if eq $f.Kind "repo" "static"}}
+        {{if eq $f.Kind "repo" "static" "compose"}}
         <label class="field"><span>{{t "service.branch"}}</span>
           <input class="input mono" name="branch" value="{{$f.Branch}}" placeholder="main"></label>
         <label class="field"><span>{{t "field.token"}}</span>

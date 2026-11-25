@@ -115,7 +115,11 @@ func (v serviceViewer) Detail(ctx context.Context, id model.ServiceID) (model.Se
 		Form: model.ServiceForm{
 			Source: s.Source, Branch: s.Branch, BuildPath: s.BuildPath, BuildTarget: s.BuildTarget, Folder: s.Folder, External: s.External, Port: s.Port,
 			AutoDeploy: s.AutoDeploy, EnvText: sec.Env.Text(), EnvFileText: sec.EnvFile.Text(), Volumes: sec.Volumes.Text(), Networks: s.Networks, HasToken: sec.GitToken != "",
+			ComposeFile: s.ComposeFile, ComposeProject: s.Project(),
 		},
+	}
+	if tools.Runtime != nil { // 여러 컨테이너로 도는 종류 — 프로젝트가 띄운 것을 보여 준다
+		view.Compose = composeServices(s, containers)
 	}
 	if to.Folder != "" {
 		view.Target = to.Folder
@@ -317,4 +321,23 @@ func stepsOf(d model.Deployment) []model.StepView {
 		}
 	}
 	return steps
+}
+
+// composeServices는 프로젝트가 띄운 서비스들이다 — 서비스 이름순, 주소가 가리키는 수와 함께.
+func composeServices(s model.Service, containers model.ContainerStates) []model.ComposeService {
+	var out []model.ComposeService
+	for name, c := range containers {
+		if c.Project != s.Project() || c.ComposeService == "" {
+			continue
+		}
+		cs := model.ComposeService{Name: c.ComposeService, Container: name, State: c.State, Status: c.Status, Ports: c.Ports, Ended: c.Ended()}
+		for _, d := range s.Domains {
+			if d.Target.Service == c.ComposeService {
+				cs.Domains++
+			}
+		}
+		out = append(out, cs)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }

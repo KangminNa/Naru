@@ -316,3 +316,54 @@ func TestLogArchivesKeepTenAndThirtyDays(t *testing.T) {
 		t.Fatal("removing the service removes its logs")
 	}
 }
+
+func TestProjectFoldersStayAndSwap(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "compose")
+	p := NewProjectFolders(root)
+	shop, _ := model.ParseServiceName("shop")
+	deploy := func(body, commit string, env string) string {
+		fresh, err := p.Fresh(shop)
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, fresh, map[string]string{"compose.yml": body, ".git/config": "[remote]"})
+		dir, err := p.Promote(shop, fresh, []byte(env), model.Commit{Hash: commit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	dir := deploy("v1", "aaa111", "SECRET=1\n")
+	if dir != filepath.Join(root, "shop") || p.Dir(shop) != dir || p.Commit(shop) != "aaa111" {
+		t.Fatalf("%s %s", dir, p.Commit(shop))
+	}
+	if info, err := os.Stat(filepath.Join(dir, ".env")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf(".env is private: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		t.Fatal("no .git left behind")
+	}
+	deploy("v2", "bbb222", "")
+	if b, _ := os.ReadFile(filepath.Join(dir, "compose.yml")); string(b) != "v2" || p.Commit(shop) != "bbb222" {
+		t.Fatal("the same path now holds the new code")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".env")); err == nil {
+		t.Fatal("an empty .env box writes no file")
+	}
+	left, _ := filepath.Glob(filepath.Join(root, ".*"))
+	os.MkdirAll(filepath.Join(root, ".shop-stale"), 0o700)
+	p.Fresh(shop)
+	if stale, _ := filepath.Glob(filepath.Join(root, ".shop-stale")); len(stale) != 0 || len(left) != 0 {
+		t.Fatalf("leftovers are cleared: %v %v", left, stale)
+	}
+	if _, err := p.Promote(shop, "/tmp/elsewhere", nil, model.Commit{}); err == nil {
+		t.Fatal("only folders it made")
+	}
+	p.Remove(shop)
+	if _, err := os.Stat(dir); err == nil {
+		t.Fatal("removed")
+	}
+	if _, err := NewProjectFolders("").Fresh(shop); err == nil {
+		t.Fatal("no root, no compose")
+	}
+}

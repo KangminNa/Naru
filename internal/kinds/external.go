@@ -6,6 +6,10 @@ import "github.com/KangminNa/naru/internal/model"
 // "이 서버"(localhost)는 저장할 때 이미 host.docker.internal로 바뀌어 있다 — 웹서버 컨테이너에서 본 호스트다.
 type ExternalDestination struct{}
 
+func (e ExternalDestination) ForDomain(s model.Service, _ model.Domain) model.Destination {
+	return e.Find(s)
+}
+
 func (ExternalDestination) Find(s model.Service) model.Destination {
 	return model.Destination{Address: s.External}
 }

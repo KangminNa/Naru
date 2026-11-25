@@ -20,6 +20,7 @@ const (
 	labelDeployment = "naru.deployment"
 
 	labelComposeProject = "com.docker.compose.project" // docker compose가 붙인다
+	labelComposeService = "com.docker.compose.service"
 	stopGrace           = 10 * time.Second
 )
 
@@ -132,7 +133,8 @@ func (k Containers) All(ctx context.Context) (model.ContainerStates, error) {
 			ports = append(ports, model.Port(p))
 		}
 		st := model.ContainerState{Name: name, Running: c.State == Running, State: string(c.State), Status: c.Status, Ports: ports,
-			Image: c.Image, Project: c.Labels[labelComposeProject], Networks: networksNamed(c.Networks)}
+			Image: c.Image, Project: c.Labels[labelComposeProject], ComposeService: c.Labels[labelComposeService], ImageID: c.ImageID,
+			Networks: networksNamed(c.Networks)}
 		if id, err := strconv.ParseInt(c.Labels[labelService], 10, 64); err == nil {
 			st.Service = model.ServiceID(id)
 		}

@@ -21,6 +21,19 @@ type ControlParts struct {
 	Past     contract.DeployHistoryReader
 	Events   contract.EventPublisher
 	Logs     contract.LogArchive // 보관한 앱 출력 — 서비스를 지우면 함께 (없으면 건너뛴다)
+	Kinds    contract.KindLookup // 여러 컨테이너로 도는 종류(Compose)는 그 종류가 통째로 멈추고·켜고·지운다
+}
+
+// runtime은 그 서비스의 종류가 통째로 다루는가 (Compose). 아니면 nil — 컨테이너 하나로 다룬다.
+func (c serviceControl) runtime(s model.Service) contract.ServiceRuntime {
+	if c.p.Kinds == nil {
+		return nil
+	}
+	tools, ok := c.p.Kinds.Find(s.Kind)
+	if !ok {
+		return nil
+	}
+	return tools.Runtime
 }
 
 type serviceControl struct{ p ControlParts }
@@ -33,13 +46,17 @@ func (c serviceControl) Stop(ctx context.Context, id model.ServiceID) error {
 	if err != nil {
 		return err
 	}
+	rt := c.runtime(s)
 	name := s.Live.CurrentContainer()
-	if name == "" {
+	if name == "" && rt == nil {
 		return model.ErrNothingToDeploy
 	}
 	s.Live.Stopped = true
 	if err := c.p.Live.Save(ctx, id, s.Live); err != nil {
 		return err
+	}
+	if rt != nil {
+		return rt.TurnOff(ctx, s)
 	}
 	return c.p.Switch.TurnOff(ctx, name)
 }
@@ -49,11 +66,16 @@ func (c serviceControl) Start(ctx context.Context, id model.ServiceID) error {
 	if err != nil {
 		return err
 	}
+	rt := c.runtime(s)
 	name := s.Live.CurrentContainer()
-	if name == "" {
+	if name == "" && rt == nil {
 		return model.ErrNothingToDeploy
 	}
-	if err := c.p.Switch.TurnOn(ctx, name); err != nil {
+	if rt != nil {
+		if err := rt.TurnOn(ctx, s); err != nil {
+			return err
+		}
+	} else if err := c.p.Switch.TurnOn(ctx, name); err != nil {
 		return err
 	}
 	s.Live.Stopped = false
@@ -69,8 +91,13 @@ func (c serviceControl) Remove(ctx context.Context, id model.ServiceID) error {
 	if err != nil {
 		return err
 	}
+	if rt := c.runtime(s); rt != nil {
+		if err := rt.Remove(ctx, s); err != nil {
+			return err
+		}
+	}
 	names := map[string]bool{}
-	if n := s.Live.CurrentContainer(); n != "" {
+	if n := s.Live.CurrentContainer(); n != "" && c.runtime(s) == nil {
 		names[n] = true
 	}
 	if more, err := c.p.Watcher.BelongingTo(ctx, id); err == nil {

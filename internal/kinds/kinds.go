@@ -26,20 +26,25 @@ type Tools struct {
 	Watcher    contract.ContainerWatcher
 	Ports      contract.PortChecker
 	Files      contract.SiteFiles
+	Compose    contract.ComposeRunner      // Compose 종류 — docker compose
+	Projects   contract.ProjectFolders     // Compose 작업 폴더 (서버와 같은 경로) — 없으면 Compose 종류를 막는다
+	ComposeOn  bool                        // Compose를 쓸 수 있게 설정됐는가 (NARU_HOST_DATA)
+	Joiner     contract.NetworkJoiner      // Compose 주소 대상을 앱 네트워크에 붙인다 (웹서버·Naru가 이름으로 닿게)
 	AppLogs    contract.ContainerLogReader // 옛 컨테이너를 지우기 전에 앱 출력을 읽는다
 	Archive    contract.LogArchive         // 그것을 남긴다 (없으면 남기지 않는다)
 
 	Network    string // 앱 컨테이너가 붙는 네트워크
 	SitesShown string // 웹서버 컨테이너에서 본 정적 사이트 폴더 (기본 /srv/sites)
 
-	ReadyTimeout time.Duration // 새 컨테이너가 응답하기를 기다리는 시간 (기본 60초)
-	PollEvery    time.Duration // 그 사이 확인 간격 (기본 0.5초)
+	ReadyTimeout   time.Duration // 새 컨테이너가 응답하기를 기다리는 시간 (기본 60초)
+	ComposeTimeout time.Duration // Compose 주소 대상이 응답하기를 기다리는 시간 (기본 5분 — db → 마이그레이션 → 앱 순서라 길다)
+	PollEvery      time.Duration // 그 사이 확인 간격 (기본 0.5초)
 }
 
 // kindLookup은 종류 이름 → 담당자 묶음이다.
 type kindLookup map[model.KindName]contract.KindTools
 
-// NewLookup은 네 종류의 담당자 묶음을 만든다.
+// NewLookup은 다섯 종류의 담당자 묶음을 만든다.
 func NewLookup(t Tools) contract.KindLookup {
 	if t.ReadyTimeout == 0 {
 		t.ReadyTimeout = 60 * time.Second
@@ -47,12 +52,19 @@ func NewLookup(t Tools) contract.KindLookup {
 	if t.PollEvery == 0 {
 		t.PollEvery = 500 * time.Millisecond
 	}
+	if t.ComposeTimeout == 0 {
+		t.ComposeTimeout = 5 * time.Minute
+	}
 	swapper := ContainerSwapper{t}
 	container, external := ContainerAliasDestination{}, ExternalDestination{}
 	status := ContainerStatus{}
 	return kindLookup{
 		model.KindRepo: {
 			Input: RepoInput{}, Builder: RepoBuilder{t}, Swapper: swapper, Destination: container, Status: status,
+		},
+		model.KindCompose: {
+			Input: ComposeInput{on: t.ComposeOn}, Builder: ComposeBuilder{t}, Swapper: ComposeSwapper{t}, Destination: ComposeDestination{},
+			Status: ComposeStatus{}, Runtime: ComposeRuntime{t},
 		},
 		model.KindImage: {
 			Input: ImageInput{}, Builder: ImageFetcher{t}, Swapper: swapper, Destination: container, Status: status,

@@ -2,6 +2,7 @@ package model
 
 import (
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -101,6 +102,7 @@ type CodeSource struct {
 	Repo   RepoURL
 	Branch Branch
 	Token  string
+	Commit string // 비면 브랜치의 최신 — 있으면 그 커밋 (되돌리기)
 }
 
 // ImageDetails는 받은 이미지의 ID와 열어둔 포트다.
@@ -137,10 +139,17 @@ type ContainerState struct {
 	OOMKilled bool
 
 	// 아래는 All이 채운다 (One은 채우지 않는다) — 다른 컨테이너 목록이 쓴다.
-	Image    string
-	Project  string          // compose 묶음 이름 (com.docker.compose.project) — 없으면 빈 값
-	Networks []DockerNetwork // 붙은 네트워크 (이름순)
-	Service  ServiceID       // Naru가 띄운 것이면 그 서비스 (naru.service 라벨) — 아니면 0
+	Image          string
+	Project        string          // compose 묶음 이름 (com.docker.compose.project) — 없으면 빈 값
+	ComposeService string          // compose 서비스 이름 (com.docker.compose.service)
+	ImageID        string          // 이미지 ID (sha256:…)
+	Networks       []DockerNetwork // 붙은 네트워크 (이름순)
+	Service        ServiceID       // Naru가 띄운 것이면 그 서비스 (naru.service 라벨) — 아니면 0
+}
+
+// Ended는 한 번 돌고 잘 끝난 컨테이너인가 (마이그레이션 같은 것) — 멈춘 것이지만 문제가 아니다.
+func (c ContainerState) Ended() bool {
+	return c.State == "exited" && strings.HasPrefix(c.Status, "Exited (0)")
 }
 
 // ContainerStates는 이름 → 상태. nil이면 Docker를 읽지 못했다.

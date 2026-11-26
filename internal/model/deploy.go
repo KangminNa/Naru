@@ -127,12 +127,13 @@ type ContainerSpec struct {
 
 // ContainerState는 컨테이너 하나의 상태다.
 type ContainerState struct {
-	Name     string
-	Running  bool
-	State    string // running · restarting · exited · created · paused · dead
-	Status   string // "Up 3 hours"
-	ExitCode int
-	Ports    []Port // 이미지가 연 포트 (EXPOSE) — 진단이 앱 포트 대신 응답하는 포트를 찾을 때
+	Name      string
+	Running   bool
+	State     string // running · restarting · exited · created · paused · dead
+	Status    string // "Up 3 hours"
+	ExitCode  int
+	Ports     []Port // 이미지가 연 포트 (EXPOSE) — 진단이 앱 포트 대신 응답하는 포트를 찾을 때
+	Published []Port // 서버에 연 포트 (-p) — All만 채운다
 
 	// One만 채운다 — Docker가 다시 시작한 횟수, 마지막으로 죽은 것이 메모리 부족이었는지
 	Restarts  int
@@ -142,14 +143,34 @@ type ContainerState struct {
 	Image          string
 	Project        string          // compose 묶음 이름 (com.docker.compose.project) — 없으면 빈 값
 	ComposeService string          // compose 서비스 이름 (com.docker.compose.service)
+	DependsOn      string          // compose가 적은 기다리는 것들 ("migrate:service_completed_successfully:false,db:service_started:false")
 	ImageID        string          // 이미지 ID (sha256:…)
 	Networks       []DockerNetwork // 붙은 네트워크 (이름순)
 	Service        ServiceID       // Naru가 띄운 것이면 그 서비스 (naru.service 라벨) — 아니면 0
 }
 
 // Ended는 한 번 돌고 잘 끝난 컨테이너인가 (마이그레이션 같은 것) — 멈춘 것이지만 문제가 아니다.
-func (c ContainerState) Ended() bool {
-	return c.State == "exited" && strings.HasPrefix(c.Status, "Exited (0)")
+// Finished는 그 컨테이너가 한 번 돌고 잘 끝난 것(마이그레이션 같은 것)인가 — 다시 띄우지 않고, 멈춘 것으로 세지 않는다.
+// 종료 코드 0만으로는 모른다(멈추라고 해서 깔끔히 끝난 DB도 0이다). compose 묶음의 다른 서비스가 이것을
+// depends_on: service_completed_successfully로 기다리는 것만 그렇다 (compose가 com.docker.compose.depends_on 라벨에 적어 둔다).
+func (cs ContainerStates) Finished(name string) bool {
+	c, ok := cs[name]
+	if !ok || c.Project == "" || c.ComposeService == "" || !EndedOK(c.State, c.Status) {
+		return false
+	}
+	for _, o := range cs {
+		if o.Project != c.Project {
+			continue
+		}
+		for _, dep := range strings.Split(o.DependsOn, ",") {
+			svc, rest, _ := strings.Cut(dep, ":")
+			cond, _, _ := strings.Cut(rest, ":")
+			if svc == c.ComposeService && cond == "service_completed_successfully" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ContainerStates는 이름 → 상태. nil이면 Docker를 읽지 못했다.

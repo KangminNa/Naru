@@ -177,6 +177,9 @@ type Outside struct {
 	Networks contract.NetworkJoiner      // 웹서버 컨테이너를 다른 네트워크에 붙이고 뗀다
 	Inspect  contract.ContainerInspector // 넘겨받을 컨테이너의 환경 변수·볼륨
 	Compose  contract.ComposeRunner      // docker compose (Compose 종류)
+	Sweeper  contract.ContainerSweeper   // 컨테이너 화면 — 멈춘 컨테이너 지우기
+	Disk     contract.DiskUsageReader    // 이미지·볼륨 화면 — docker system df
+	Volumes  contract.VolumeRemover      // 이미지·볼륨 화면 — 볼륨 지우기
 
 	WatchEvery time.Duration // 지켜보는 간격 (0이면 30초)
 	Clock      contract.Clock
@@ -194,6 +197,7 @@ func RealOutside(cfg Config) Outside {
 		Builder: docker.NewBuildxBuilder(cfg.Buildx, cfg.DockerSocket, filepath.Join(cfg.DataDir, "work", ".buildx")),
 		Puller:  docker.NewPuller(d), Images: docker.NewImages(d),
 		Starter: containers, Remover: containers, Switch: containers, Watcher: containers, AppLogs: containers, Usage: containers, Networks: containers, Inspect: containers,
+		Sweeper: containers, Disk: containers, Volumes: containers,
 		Compose: docker.NewComposeCLI(cfg.Compose, cfg.Buildx, cfg.DockerSocket, filepath.Join(cfg.DataDir, "work", ".compose")),
 		Code:    git.Downloader{}, Ports: netcheck.TCP{}, DNS: netcheck.NewDNS(nil),
 		Stats:   stats.NewProcSampler(cfg.ProcDir, cfg.DataDir),
@@ -385,10 +389,16 @@ func (a *App) assemble() error {
 		Services: serviceStore, Containers: out.Watcher, Inspector: out.Inspect, Hide: []string{cfg.CaddyContainer, selfHost(cfg.SelfUpstream)},
 		AppNetwork: cfg.Network,
 	}, a.log)
+	usage, _ := watcher.(contract.UsageBoard) // 지켜보기가 돌고 있는 모든 컨테이너의 CPU·메모리를 읽어 둔다
+	board := views.NewContainerBoard(views.BoardParts{
+		Services: serviceStore, Containers: out.Watcher, Inspector: out.Inspect, Logs: out.AppLogs, Switch: out.Switch, Sweeper: out.Sweeper,
+		Usage: usage, Self: selfHost(cfg.SelfUpstream), WebServer: cfg.CaddyContainer,
+	})
+	storage := views.NewStorageBoard(views.StorageParts{Disk: out.Disk, Images: out.Images, Volumes: out.Volumes})
 
 	srv, err := web.New(web.Deps{
 		Login: login, Accounts: a.Accounts, SetupKey: a.key, AdminDomain: adminDomain, CertEmail: certEmail, Setup: setup,
-		Launcher: launcher, Editor: editor, Viewer: viewer, Finder: finder, Monitor: monitor, Audit: auditLog, Targets: targets, Deployer: deployer, Control: control, Hooks: hooks,
+		Launcher: launcher, Editor: editor, Viewer: viewer, Finder: finder, Containers: board, Storage: storage, Monitor: monitor, Audit: auditLog, Targets: targets, Deployer: deployer, Control: control, Hooks: hooks,
 		Stats: out.Stats, WebServer: sync, DNS: out.DNS, Certs: out.Certs, Clock: out.Clock, Log: a.log,
 		WebSettings: webSettings, Nginx: websettings.NginxReader{}, Alerts: alertSettings, DataDir: cfg.DataDir, Version: cfg.Version,
 	})

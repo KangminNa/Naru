@@ -191,8 +191,8 @@ func (ComposeStatus) Read(s model.Service, containers model.ContainerStates) mod
 	}
 	running, total := 0, 0
 	bad := ""
-	for _, c := range containers {
-		if c.Project != s.Project() || c.Ended() {
+	for name, c := range containers {
+		if c.Project != s.Project() || containers.Finished(name) {
 			continue
 		}
 		total++

@@ -143,6 +143,8 @@ func (f *fakeDocker) TurnOff(_ context.Context, name string) error {
 	return nil
 }
 
+func (f *fakeDocker) Restart(ctx context.Context, name string) error { return f.TurnOn(ctx, name) }
+
 func (f *fakeDocker) TurnOn(_ context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

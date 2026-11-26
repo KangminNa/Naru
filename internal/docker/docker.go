@@ -39,11 +39,12 @@ const (
 )
 
 type Container struct {
-	Name   string
-	Image  string
-	State  State
-	Status string // "Up 3 hours", "Exited (1) 2 minutes ago"
-	Ports  []int  // 이미지가 연 TCP 포트 (EXPOSE — 바깥에 열지 않은 것도)
+	Name      string
+	Image     string
+	State     State
+	Status    string // "Up 3 hours", "Exited (1) 2 minutes ago"
+	Ports     []int  // 이미지가 연 TCP 포트 (EXPOSE — 바깥에 열지 않은 것도)
+	Published []int  // 서버에 연 TCP·UDP 포트 (-p)
 
 	Labels   map[string]string
 	Networks []string // 붙은 네트워크 이름 (이름순)
@@ -66,6 +67,7 @@ func (c *Client) containers(ctx context.Context) (map[string]Container, error) {
 		Status  string
 		Ports   []struct {
 			PrivatePort int
+			PublicPort  int
 			Type        string
 		}
 		Labels          map[string]string
@@ -80,18 +82,22 @@ func (c *Client) containers(ctx context.Context) (map[string]Container, error) {
 	for _, r := range raw {
 		for _, n := range r.Names {
 			name := strings.TrimPrefix(n, "/")
-			var ports []int
+			var ports, published []int
 			for _, p := range r.Ports {
 				if p.Type == "tcp" && !slices.Contains(ports, p.PrivatePort) {
 					ports = append(ports, p.PrivatePort)
 				}
+				if p.PublicPort > 0 && !slices.Contains(published, p.PublicPort) {
+					published = append(published, p.PublicPort)
+				}
 			}
+			slices.Sort(published)
 			nets := make([]string, 0, len(r.NetworkSettings.Networks))
 			for n := range r.NetworkSettings.Networks {
 				nets = append(nets, n)
 			}
 			slices.Sort(nets)
-			out[name] = Container{Name: name, Image: r.Image, State: State(r.State), Status: r.Status, Ports: ports, Labels: r.Labels, Networks: nets, ImageID: r.ImageID}
+			out[name] = Container{Name: name, Image: r.Image, State: State(r.State), Status: r.Status, Ports: ports, Published: published, Labels: r.Labels, Networks: nets, ImageID: r.ImageID}
 		}
 	}
 	return out, nil

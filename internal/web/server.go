@@ -33,7 +33,7 @@ const (
 	sessionMaxAge = 7 * 24 * time.Hour
 )
 
-var pageNames = []string{"setup_token", "setup_account", "setup_domain", "setup_https", "setup_done", "login", "home", "service", "new_service", "deploy", "settings", "notfound", "logs", "server"}
+var pageNames = []string{"setup_token", "setup_account", "setup_domain", "setup_https", "setup_done", "login", "home", "service", "new_service", "deploy", "settings", "notfound", "logs", "server", "containers", "container", "storage"}
 
 // Deps는 화면이 쓰는 것들이다. 모두 인터페이스다 — 화면은 저장소도, Docker도, 웹서버도 직접 모른다.
 type Deps struct {
@@ -47,6 +47,8 @@ type Deps struct {
 	Editor      contract.ServiceEditor
 	Viewer      contract.ServiceViewer
 	Finder      contract.ContainerFinder
+	Containers  contract.ContainerBoard // 이 서버의 모든 컨테이너 — 다시 시작·멈추기·켜기·멈춘 것 지우기
+	Storage     contract.StorageBoard   // 이미지·볼륨 — 하나씩 지우기
 	Monitor     contract.MonitorViewer
 	Targets     contract.TargetEditor
 	Audit       contract.AuditLog // 관리자가 한 일을 남긴다 (없으면 남기지 않는다)
@@ -113,6 +115,14 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /{$}", s.home)
 	s.mux.HandleFunc("GET /server", s.serverPage)
+	s.mux.HandleFunc("GET /containers", s.containersPage)
+	s.mux.HandleFunc("GET /containers/{name}", s.containerPage)
+	s.mux.HandleFunc("GET /containers/{name}/logs.txt", s.containerLogsText)
+	s.mux.HandleFunc("POST /containers/{name}/{action}", s.containerAction)
+	s.mux.HandleFunc("POST /containers/projects/{project}/{action}", s.projectAction)
+	s.mux.HandleFunc("GET /storage", s.storagePage)
+	s.mux.HandleFunc("POST /storage/images/{id}/delete", s.removeImage)
+	s.mux.HandleFunc("POST /storage/volumes/{name}/delete", s.removeVolume)
 	s.mux.HandleFunc("GET /services/new", s.newServicePage)
 	s.mux.HandleFunc("POST /services/new", s.createService)
 	s.mux.HandleFunc("GET /services/{id}", s.servicePage)

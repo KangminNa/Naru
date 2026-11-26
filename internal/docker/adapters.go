@@ -21,6 +21,7 @@ const (
 
 	labelComposeProject = "com.docker.compose.project" // docker compose가 붙인다
 	labelComposeService = "com.docker.compose.service"
+	labelComposeDepends = "com.docker.compose.depends_on"
 	stopGrace           = 10 * time.Second
 )
 
@@ -54,7 +55,17 @@ func (i Images) Exists(ctx context.Context, id model.ImageID) bool {
 	return err == nil
 }
 
-func (i Images) Remove(ctx context.Context, ref string) error { return i.c.removeImage(ctx, ref) }
+// Remove는 이미지를 지운다. 강제하지 않는다 — 쓰는 컨테이너가 있거나 태그가 여럿이면 model.ErrInUse.
+func (i Images) Remove(ctx context.Context, ref string) error {
+	err := i.c.removeImage(ctx, ref)
+	switch {
+	case errors.Is(err, ErrConflict):
+		return fmt.Errorf("%w: %v", model.ErrInUse, err)
+	case errors.Is(err, ErrNotFound):
+		return fmt.Errorf("%w: %v", model.ErrNotFound, err)
+	}
+	return err
+}
 
 // Containers는 컨테이너를 띄우고·없애고·멈추고·켜고, 상태를 본다. network는 앱 컨테이너가 붙는 네트워크다.
 type Containers struct {
@@ -120,6 +131,40 @@ func (k Containers) TurnOff(ctx context.Context, name string) error {
 }
 func (k Containers) TurnOn(ctx context.Context, name string) error { return k.c.start(ctx, name) }
 
+// Restart는 다시 시작한다 (ContainerSwitch). 멈춘 것이면 띄운다.
+func (k Containers) Restart(ctx context.Context, name string) error {
+	return k.c.restart(ctx, name, stopGrace)
+}
+
+// RemoveStopped는 멈춘 컨테이너를 지운다 (ContainerSweeper). 강제하지 않는다 — 돌고 있으면 model.ErrRunning.
+func (k Containers) RemoveStopped(ctx context.Context, name string) error {
+	err := k.c.removeStopped(ctx, name)
+	switch {
+	case errors.Is(err, ErrConflict):
+		return fmt.Errorf("%w: %v", model.ErrRunning, err)
+	case errors.Is(err, ErrNotFound):
+		return fmt.Errorf("%w: %v", model.ErrNotFound, err)
+	}
+	return err
+}
+
+// DiskUsage는 이미지·볼륨과 크기다 (DiskUsageReader) — docker system df.
+func (k Containers) DiskUsage(ctx context.Context) (model.DockerDisk, error) {
+	return k.c.diskUsage(ctx)
+}
+
+// RemoveVolume은 볼륨을 지운다 (VolumeRemover). 강제하지 않는다 — 쓰는 컨테이너가 있으면 model.ErrInUse.
+func (k Containers) RemoveVolume(ctx context.Context, name string) error {
+	err := k.c.call(ctx, http.MethodDelete, "/volumes/"+url.PathEscape(name), nil, nil)
+	switch {
+	case errors.Is(err, ErrConflict):
+		return fmt.Errorf("%w: %v", model.ErrInUse, err)
+	case errors.Is(err, ErrNotFound):
+		return fmt.Errorf("%w: %v", model.ErrNotFound, err)
+	}
+	return err
+}
+
 // All은 모든 컨테이너 상태를 한 번에 읽는다.
 func (k Containers) All(ctx context.Context) (model.ContainerStates, error) {
 	raw, err := k.c.containers(ctx)
@@ -132,8 +177,12 @@ func (k Containers) All(ctx context.Context) (model.ContainerStates, error) {
 		for _, p := range c.Ports {
 			ports = append(ports, model.Port(p))
 		}
-		st := model.ContainerState{Name: name, Running: c.State == Running, State: string(c.State), Status: c.Status, Ports: ports,
-			Image: c.Image, Project: c.Labels[labelComposeProject], ComposeService: c.Labels[labelComposeService], ImageID: c.ImageID,
+		var published []model.Port
+		for _, p := range c.Published {
+			published = append(published, model.Port(p))
+		}
+		st := model.ContainerState{Name: name, Running: c.State == Running, State: string(c.State), Status: c.Status, Ports: ports, Published: published,
+			Image: c.Image, Project: c.Labels[labelComposeProject], ComposeService: c.Labels[labelComposeService], DependsOn: c.Labels[labelComposeDepends], ImageID: c.ImageID,
 			Networks: networksNamed(c.Networks)}
 		if id, err := strconv.ParseInt(c.Labels[labelService], 10, 64); err == nil {
 			st.Service = model.ServiceID(id)
@@ -190,7 +239,8 @@ func (k Containers) Inspect(ctx context.Context, name string) (model.ContainerDe
 	if err != nil {
 		return model.ContainerDetails{}, err
 	}
-	return model.ContainerDetails{Env: d.Env, ImageEnv: d.ImageEnv, Binds: d.Binds, NamedVolumes: d.NamedVolumes, Source: d.Source}, nil
+	return model.ContainerDetails{Env: d.Env, ImageEnv: d.ImageEnv, Binds: d.Binds, NamedVolumes: d.NamedVolumes, Source: d.Source,
+		Health: d.Health, HealthLog: d.HealthLog, Started: d.Started, Restarts: d.Restarts}, nil
 }
 
 // Join은 컨테이너를 네트워크에 붙인다. 이미 붙어 있으면 그대로 괜찮다.

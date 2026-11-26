@@ -274,6 +274,9 @@ var okKeys = map[string]string{
 	"alert-added": "ok.alertadded", "alert-removed": "ok.alertremoved", "alert-tested": "ok.alerttested",
 	"domain-added": "ok.domainadded", "domain-removed": "ok.domainremoved", "deleted": "ok.deleted", "web": "ok.web",
 	"port": "ok.port", "target": "ok.target",
+	"restart": "ok.container.restart", "stop": "ok.container.stop", "start": "ok.container.start", "removed": "ok.container.removed",
+	"project-restart": "ok.project.restart", "project-stop": "ok.project.stop", "project-start": "ok.project.start",
+	"image-removed": "ok.image.removed", "volume-removed": "ok.volume.removed",
 }
 
 // ── 설정 ───────────────────────────────────

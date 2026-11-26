@@ -123,6 +123,10 @@ type ContainerDetails struct {
 	Binds        []string // 호스트 경로를 붙인 것 — "/서버경로:/컨테이너경로[:ro]"
 	NamedVolumes []string // "이름:/컨테이너경로"
 	Source       string   // 이미지 라벨 org.opencontainers.image.source
+	Health       string   // 상태 검사 결과 (healthy · unhealthy · starting · "")
+	HealthLog    string   // 상태 검사의 마지막 출력
+	Started      time.Time
+	Restarts     int
 }
 
 // HomeView는 홈 화면이다.

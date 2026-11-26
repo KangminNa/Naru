@@ -47,31 +47,13 @@
 </a>
 {{end}}
 
-{{if .Data.Others}}
+{{if .Data.OtherCount}}
 <section class="others" aria-labelledby="others-h">
   <div class="others-head">
     <h2 id="others-h">{{t "others.title"}} <span class="count">{{.Data.OtherCount}}</span></h2>
-    <span class="muted">{{t "others.sub"}}</span>
+    <span class="muted">{{t "others.summary" .Data.OtherRunning}}{{if .Data.OtherStopped}} · <span class="bad-text">{{t "others.stopped" .Data.OtherStopped}}</span>{{end}}{{if .Data.OtherSick}} · <span class="bad-text">{{t "others.sick" .Data.OtherSick}}</span>{{end}}</span>
+    <a class="btn small" href="/containers">{{t "others.open"}}</a>
   </div>
-  <div class="others-list">
-    {{range .Data.Others}}
-    <div class="others-group">{{if .Project}}<b>{{.Project}}</b> · {{t "others.compose"}}{{else}}{{t "others.standalone"}}{{end}}</div>
-    {{range .Items}}
-    <div class="other{{if not .Running}} off{{end}}">
-      <span class="dot {{if .Running}}ok{{else}}muted{{end}}"></span>
-      <div class="other-text">
-        <b class="mono">{{.Name}}</b>
-        <span>{{with .Ports}}{{t "others.port" (index . 0)}} · {{end}}{{.Status}}{{range .Networks}} · {{.}}{{end}}{{if .Linked}} · <a href="/services/{{.Linked}}">{{t "others.linked" .LinkedName}}</a>{{else if .OnlyBridge}} · <em class="warn">{{t "others.bridge"}}</em>{{end}}</span>
-      </div>
-      {{if .Running}}<div class="other-actions">
-        {{if not .Linked}}<a class="btn small" href="/services/new?kind=external&amp;upstream={{.Upstream}}">{{t "others.attach"}}</a>{{end}}
-        <a class="btn small" href="/services/new?kind=repo&amp;adopt={{.Name}}">{{t "others.adopt"}}</a>
-      </div>{{end}}
-    </div>
-    {{end}}
-    {{end}}
-  </div>
-  <p class="others-note">{{t "others.note"}}</p>
 </section>
 {{end}}
 

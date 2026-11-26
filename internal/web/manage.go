@@ -530,9 +530,6 @@ func (s *Server) serviceView(r *http.Request, u model.Account, sv model.ServiceV
 	return view{Nav: "home", User: &u, Data: d}
 }
 
-// 리다이렉트 뒤 ?err= 로 받는 값도 이 목록으로만 바꾼다.
-var errKeys = map[string]string{"rollback": "err.rollback", "docker": "err.docker"}
-
 // setPort는 진단의 [포트를 N으로 바꾸기]다 — 다시 배포하지 않고 웹서버만 새 포트로 보낸다.
 func (s *Server) setPort(w http.ResponseWriter, r *http.Request) {
 	if _, _, ok := s.gate(w, r); !ok {

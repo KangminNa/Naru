@@ -47,8 +47,9 @@ type Parts struct {
 type healthWatcher struct {
 	p Parts
 
-	mu   sync.RWMutex
-	snap model.WatchSnapshot
+	mu    sync.RWMutex
+	snap  model.WatchSnapshot
+	usage map[string]model.ResourceUsage // 컨테이너 이름 → 마지막 CPU·메모리 (돌고 있는 모든 것)
 
 	checked    bool
 	services   map[model.ServiceID]*flag
@@ -183,29 +184,25 @@ func (w *healthWatcher) check(ctx context.Context) {
 	w.publishSnapshot(all, findings, usage, now)
 }
 
-// readUsage는 실행 중인 컨테이너 서비스의 CPU·메모리를 읽는다. 하나에 1초쯤 걸려 동시에 넷까지.
-// 못 읽은 것은 빼 둔다 — 화면에 "—"로 보인다.
+// readUsage는 돌고 있는 모든 컨테이너의 CPU·메모리를 읽는다 (컨테이너 화면이 Latest로 본다). 하나에 1초쯤 걸려 동시에 넷까지.
+// 서비스의 것은 서비스 번호로 따로 돌려준다 — 기록·화면이 쓴다. 못 읽은 것은 빼 둔다 (화면에 "—").
 func (w *healthWatcher) readUsage(ctx context.Context, all []model.Service, states model.ContainerStates) map[model.ServiceID]model.ResourceUsage {
 	out := map[model.ServiceID]model.ResourceUsage{}
-	if states == nil {
+	if states == nil || w.p.Usage == nil {
 		return out
 	}
 	var (
 		mu    sync.Mutex
 		wg    sync.WaitGroup
 		slots = make(chan struct{}, 4)
+		read  = map[string]model.ResourceUsage{}
 	)
-	for _, s := range all {
-		tools, ok := w.p.Kinds.Find(s.Kind)
-		if !ok || !tools.Destination.Find(s).Container || s.Live.Stopped {
-			continue
-		}
-		name := s.Live.CurrentContainer()
-		if st, ok := states[name]; !ok || st.State != "running" {
+	for name, st := range states {
+		if st.State != "running" {
 			continue
 		}
 		wg.Add(1)
-		go func(id model.ServiceID) {
+		go func(name string) {
 			defer wg.Done()
 			slots <- struct{}{}
 			defer func() { <-slots }()
@@ -213,13 +210,33 @@ func (w *healthWatcher) readUsage(ctx context.Context, all []model.Service, stat
 			defer cancel()
 			if u, err := w.p.Usage.Usage(uctx, name); err == nil {
 				mu.Lock()
-				out[id] = u
+				read[name] = u
 				mu.Unlock()
 			}
-		}(s.ID)
+		}(name)
 	}
 	wg.Wait()
+	w.mu.Lock()
+	w.usage = read
+	w.mu.Unlock()
+	for _, s := range all {
+		tools, ok := w.p.Kinds.Find(s.Kind)
+		if !ok || !tools.Destination.Find(s).Container || s.Live.Stopped {
+			continue
+		}
+		if u, ok := read[s.Live.CurrentContainer()]; ok {
+			out[s.ID] = u
+		}
+	}
 	return out
+}
+
+// Latest는 그 컨테이너의 마지막 CPU·메모리다 (UsageBoard).
+func (w *healthWatcher) Latest(container string) (model.ResourceUsage, bool) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	u, ok := w.usage[container]
+	return u, ok
 }
 
 func (w *healthWatcher) judgeServices(ctx context.Context, all []model.Service, states model.ContainerStates, now time.Time) {

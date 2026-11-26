@@ -65,6 +65,9 @@ func (c *Client) call(ctx context.Context, method, path string, in any, out any)
 	if res.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("%w: %s", ErrNotFound, apiMessage(raw))
 	}
+	if res.StatusCode == http.StatusConflict {
+		return fmt.Errorf("%w: %s", ErrConflict, apiMessage(raw))
+	}
 	if res.StatusCode >= 300 && res.StatusCode != http.StatusNotModified {
 		return fmt.Errorf("docker: %s %s: %d %s", method, path, res.StatusCode, apiMessage(raw))
 	}
@@ -74,7 +77,10 @@ func (c *Client) call(ctx context.Context, method, path string, in any, out any)
 	return nil
 }
 
-var ErrNotFound = errors.New("docker: not found")
+var (
+	ErrNotFound = errors.New("docker: not found")
+	ErrConflict = errors.New("docker: conflict") // 409 — 쓰는 중, 돌고 있는 중
+)
 
 func apiMessage(raw []byte) string {
 	var m struct{ Message string }
@@ -267,8 +273,20 @@ func (c *Client) start(ctx context.Context, name string) error {
 }
 
 // Stop은 SIGTERM 뒤 grace만큼 기다린다.
+// 멈추기·다시 시작은 grace만큼 기다리므로 기본 제한시간(10초)으로 끊지 않는다 — 호출한 쪽의 ctx로 끊는다.
+// (끊으면 Docker는 계속 멈추는데 Naru는 실패로 알고, 그 사이 켜기가 끼어들어 엉킨다.)
 func (c *Client) stop(ctx context.Context, name string, grace time.Duration) error {
-	return c.call(ctx, http.MethodPost, fmt.Sprintf("/containers/%s/stop?t=%d", url.PathEscape(name), int(grace.Seconds())), nil, nil)
+	return c.callLong(ctx, http.MethodPost, fmt.Sprintf("/containers/%s/stop?t=%d", url.PathEscape(name), int(grace.Seconds())), nil)
+}
+
+// restart는 멈췄다 다시 띄운다 (멈춘 것이면 띄운다).
+func (c *Client) restart(ctx context.Context, name string, grace time.Duration) error {
+	return c.callLong(ctx, http.MethodPost, fmt.Sprintf("/containers/%s/restart?t=%d", url.PathEscape(name), int(grace.Seconds())), nil)
+}
+
+// removeStopped는 강제하지 않고 지운다 — 돌고 있으면 Docker가 409로 거절한다.
+func (c *Client) removeStopped(ctx context.Context, name string) error {
+	return c.call(ctx, http.MethodDelete, "/containers/"+url.PathEscape(name), nil, nil)
 }
 
 func (c *Client) remove(ctx context.Context, name string) error {
@@ -305,11 +323,22 @@ type Details struct {
 	Env, ImageEnv       []string
 	Binds, NamedVolumes []string
 	Source              string
+	Health, HealthLog   string
+	Started             time.Time
+	Restarts            int
 }
 
 func (c *Client) details(ctx context.Context, name string) (Details, error) {
 	var raw struct {
-		Image  string // 이미지 ID
+		Image        string // 이미지 ID
+		RestartCount int
+		State        struct {
+			StartedAt time.Time
+			Health    *struct {
+				Status string
+				Log    []struct{ Output string }
+			}
+		}
 		Config struct {
 			Env    []string
 			Labels map[string]string
@@ -322,7 +351,16 @@ func (c *Client) details(ctx context.Context, name string) (Details, error) {
 	if err := c.call(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/json", nil, &raw); err != nil {
 		return Details{}, err
 	}
-	d := Details{Env: raw.Config.Env, Source: raw.Config.Labels["org.opencontainers.image.source"]}
+	d := Details{Env: raw.Config.Env, Source: raw.Config.Labels["org.opencontainers.image.source"], Started: raw.State.StartedAt, Restarts: raw.RestartCount}
+	if h := raw.State.Health; h != nil {
+		d.Health = h.Status
+		if n := len(h.Log); n > 0 {
+			d.HealthLog = strings.TrimSpace(h.Log[n-1].Output)
+			if len(d.HealthLog) > 500 {
+				d.HealthLog = d.HealthLog[:500] + "…"
+			}
+		}
+	}
 	for _, m := range raw.Mounts {
 		switch m.Type {
 		case "bind":

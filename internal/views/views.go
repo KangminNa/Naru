@@ -330,7 +330,7 @@ func composeServices(s model.Service, containers model.ContainerStates) []model.
 		if c.Project != s.Project() || c.ComposeService == "" {
 			continue
 		}
-		cs := model.ComposeService{Name: c.ComposeService, Container: name, State: c.State, Status: c.Status, Ports: c.Ports, Ended: c.Ended()}
+		cs := model.ComposeService{Name: c.ComposeService, Container: name, State: c.State, Status: c.Status, Ports: c.Ports, Ended: containers.Finished(name)}
 		for _, d := range s.Domains {
 			if d.Target.Service == c.ComposeService {
 				cs.Domains++

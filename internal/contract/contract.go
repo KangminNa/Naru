@@ -467,10 +467,47 @@ type ContainerRemover interface {
 	Remove(ctx context.Context, name string) error
 }
 
-// ContainerSwitch는 컨테이너를 멈추고 켠다.
+// ContainerSwitch는 컨테이너를 멈추고, 켜고, 다시 시작한다.
 type ContainerSwitch interface {
 	TurnOff(ctx context.Context, name string) error
 	TurnOn(ctx context.Context, name string) error
+	Restart(ctx context.Context, name string) error
+}
+
+// ContainerSweeper는 멈춘 컨테이너 하나를 지운다. 강제하지 않는다 — 돌고 있으면 model.ErrRunning.
+type ContainerSweeper interface {
+	RemoveStopped(ctx context.Context, name string) error
+}
+
+// DiskUsageReader는 이미지·볼륨과 크기·쓰는 컨테이너 수를 읽는다 (docker system df — 몇 초 걸린다).
+type DiskUsageReader interface {
+	DiskUsage(ctx context.Context) (model.DockerDisk, error)
+}
+
+// VolumeRemover는 볼륨 하나를 지운다. 강제하지 않는다 — 쓰는 컨테이너가 있으면 model.ErrInUse.
+type VolumeRemover interface {
+	RemoveVolume(ctx context.Context, name string) error
+}
+
+// UsageBoard는 지켜보기가 30초마다 읽은, 돌고 있는 모든 컨테이너의 CPU·메모리다.
+type UsageBoard interface {
+	Latest(container string) (model.ResourceUsage, bool)
+}
+
+// ContainerBoard는 컨테이너 화면이다 — 이 서버의 모든 컨테이너. 보호 규칙을 여기서 지킨다:
+// Naru 자신·웹서버·Naru 서비스의 컨테이너는 model.ErrProtected, 돌고 있는 것을 지우면 model.ErrRunning.
+type ContainerBoard interface {
+	List(ctx context.Context) ([]model.ContainerGroup, error)                    // compose 묶음별·이름순. Docker를 읽지 못하면 오류
+	Detail(ctx context.Context, name, query string) (model.ContainerView, error) // 없으면 model.ErrNotFound
+	Act(ctx context.Context, name string, a model.ContainerAction) error
+	ActProject(ctx context.Context, project string, a model.ContainerAction) error // restart·stop·start만 — 끝난 일회성 컨테이너는 건드리지 않는다
+}
+
+// StorageBoard는 이미지·볼륨 화면이다. 하나씩만 지운다 — 한꺼번에 정리(prune)는 없다.
+type StorageBoard interface {
+	Disk(ctx context.Context) (model.StorageView, error)
+	RemoveImage(ctx context.Context, id model.ImageID) error // 쓰는 중이면 model.ErrInUse
+	RemoveVolume(ctx context.Context, name string) error     // 쓰는 중이면 model.ErrInUse
 }
 
 // ContainerWatcher는 컨테이너 상태·로그, 이 서비스의 컨테이너 목록을 본다.

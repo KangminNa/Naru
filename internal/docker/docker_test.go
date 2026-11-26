@@ -387,3 +387,82 @@ func TestNetworks(t *testing.T) {
 		t.Fatalf("already left is fine: %v", err)
 	}
 }
+
+// 컨테이너 화면이 쓰는 것 — 다시 시작, 강제하지 않는 지우기, 볼륨·이미지 지우기의 409, system df, 서버에 연 포트.
+func TestContainerScreenCalls(t *testing.T) {
+	var calls []string
+	sock := fakeDocker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.RequestURI())
+		conflict := func(msg string) { w.WriteHeader(http.StatusConflict); fmt.Fprintf(w, `{"message":%q}`, msg) }
+		switch r.Method + " " + r.URL.Path {
+		case "POST /containers/web/restart":
+			w.WriteHeader(http.StatusNoContent)
+		case "DELETE /containers/busy":
+			conflict("cannot remove container: container is running")
+		case "DELETE /containers/old":
+			w.WriteHeader(http.StatusNoContent)
+		case "DELETE /volumes/used":
+			conflict("volume is in use - [abc]")
+		case "DELETE /volumes/free":
+			w.WriteHeader(http.StatusNoContent)
+		case "DELETE /images/sha256:busy":
+			conflict("image is being used by stopped container 1234")
+		case "GET /system/df":
+			w.Write([]byte(`{"Images":[{"Id":"sha256:aaa","RepoTags":["me/app:1"],"Size":1000,"Created":1795000000,"Containers":0},
+				{"Id":"sha256:bbb","RepoTags":["<none>:<none>"],"Size":5000,"Created":1795000000,"Containers":2}],
+				"Volumes":[{"Name":"shop_db","Labels":{"com.docker.compose.project":"shop"},"UsageData":{"Size":2048,"RefCount":1}},
+				{"Name":"loose","Labels":null,"UsageData":{"Size":-1,"RefCount":0}}]}`))
+		case "GET /containers/json":
+			w.Write([]byte(`[{"Names":["/mail"],"State":"running","Status":"Up 1 hour (healthy)","Ports":[
+				{"PrivatePort":25,"PublicPort":25,"Type":"tcp","IP":"0.0.0.0"},{"PrivatePort":25,"PublicPort":25,"Type":"tcp","IP":"::"},
+				{"PrivatePort":993,"PublicPort":993,"Type":"tcp"},{"PrivatePort":8080,"Type":"tcp"}]}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	ctx := context.Background()
+	k := NewContainers(New(sock))
+	if err := k.Restart(ctx, "web"); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.RemoveStopped(ctx, "busy"); !errors.Is(err, model.ErrRunning) {
+		t.Fatalf("a running container: %v", err)
+	}
+	if err := k.RemoveStopped(ctx, "old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.RemoveStopped(ctx, "gone"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("%v", err)
+	}
+	if err := k.RemoveVolume(ctx, "used"); !errors.Is(err, model.ErrInUse) {
+		t.Fatalf("%v", err)
+	}
+	if err := k.RemoveVolume(ctx, "free"); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewImages(New(sock)).Remove(ctx, "sha256:busy"); !errors.Is(err, model.ErrInUse) {
+		t.Fatalf("%v", err)
+	}
+	for _, c := range calls {
+		if strings.Contains(c, "force") {
+			t.Fatalf("nothing is forced: %s", c)
+		}
+	}
+	d, err := k.DiskUsage(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Images) != 2 || d.Images[0].ID != "sha256:bbb" || len(d.Images[0].Tags) != 0 || d.Images[0].UsedBy != 2 || d.Images[1].Tags[0] != "me/app:1" {
+		t.Fatalf("largest first, <none> dropped: %+v", d.Images)
+	}
+	if len(d.Volumes) != 2 || d.Volumes[0].Name != "shop_db" || d.Volumes[0].Project != "shop" || d.Volumes[0].UsedBy != 1 || d.Volumes[1].Size != 0 {
+		t.Fatalf("%+v", d.Volumes)
+	}
+	all, err := k.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := all["mail"]; fmt.Sprint(m.Published) != "[25 993]" || fmt.Sprint(m.Ports) != "[25 993 8080]" {
+		t.Fatalf("ports on the server vs. inside: %+v", m)
+	}
+}

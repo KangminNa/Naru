@@ -78,31 +78,16 @@ func findingOf(f model.Finding) finding {
 // ── 홈 ────────────────────────────────────
 
 type homeScreen struct {
-	AdminDomain string
-	Host        model.ServerSnapshot
-	Services    []card
-	Engine      model.WebServerStatus
-	Attention   []finding // 웹서버·Docker(지금 상태) 먼저, 그다음 지켜보기가 찾은 것
-	Checked     bool
-	Others      []otherGroup // Naru가 띄우지 않은 이 서버의 컨테이너 — compose 묶음별
-	OtherCount  int
-}
-
-// otherGroup은 다른 컨테이너 한 묶음이다 — compose 묶음 하나, 또는 따로 띄운 것들(Project가 빈 값).
-type otherGroup struct {
-	Project string
-	Items   []model.OtherContainer
-}
-
-func groupOthers(all []model.OtherContainer) []otherGroup {
-	var out []otherGroup
-	for _, c := range all {
-		if n := len(out); n == 0 || out[n-1].Project != c.Project {
-			out = append(out, otherGroup{Project: c.Project})
-		}
-		out[len(out)-1].Items = append(out[len(out)-1].Items, c)
-	}
-	return out
+	AdminDomain  string
+	Host         model.ServerSnapshot
+	Services     []card
+	Engine       model.WebServerStatus
+	Attention    []finding // 웹서버·Docker(지금 상태) 먼저, 그다음 지켜보기가 찾은 것
+	Checked      bool
+	OtherCount   int // Naru가 띄우지 않은 이 서버의 컨테이너 — 목록은 컨테이너 화면에
+	OtherRunning int
+	OtherStopped int // 멈춘 것 (한 번 돌고 잘 끝난 것은 빼고)
+	OtherSick    int // 상태 검사가 실패하는 것
 }
 
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
@@ -125,8 +110,24 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		d.Attention = append(d.Attention, findingOf(f))
 	}
 	d.Checked = h.Checked
-	if others, err := s.d.Finder.Others(r.Context()); err == nil { // 못 읽으면 목록만 없다
-		d.Others, d.OtherCount = groupOthers(others), len(others)
+	if groups, err := s.d.Containers.List(r.Context()); err == nil { // 못 읽으면 요약만 없다
+		for _, g := range groups {
+			for _, c := range g.Rows {
+				if c.Locked != "" { // Naru 자신·웹서버·서비스의 것은 위의 카드가 보여 준다
+					continue
+				}
+				d.OtherCount++
+				switch {
+				case c.Running() && c.Health == "unhealthy":
+					d.OtherRunning++
+					d.OtherSick++
+				case c.Running():
+					d.OtherRunning++
+				case !c.Ended:
+					d.OtherStopped++
+				}
+			}
+		}
 	}
 	for _, c := range h.Cards {
 		d.Services = append(d.Services, cardOf(c))

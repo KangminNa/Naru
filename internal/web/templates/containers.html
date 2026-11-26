@@ -1,0 +1,33 @@
+{{define "root"}}{{template "app" .}}{{end}}
+{{define "title"}}{{t "containers.title"}}{{end}}
+{{define "content"}}
+<div class="hero"><div><h1>{{t "containers.title"}}</h1><p>{{t "containers.sub"}}</p></div>
+  <div class="head-actions"><a class="btn" href="/storage">{{t "containers.storage"}}</a></div></div>
+{{template "error" .}}
+{{if .Data.Unreachable}}<p class="flash bad">{{t "containers.unreachable"}}</p>{{end}}
+{{range .Data.Groups}}{{$g := .}}
+<section class="section ctr-group" id="p-{{.Project}}">
+  <div class="ctr-group-head">
+    <h2>{{if .Project}}{{.Project}} <span class="muted small">· {{t "containers.compose" (len .Rows) .Running}}</span>{{else}}{{t "containers.standalone"}}{{end}}</h2>
+    {{if .Project}}{{if .Locked}}<span class="muted small">{{t (print "containers.locked." .Locked)}}</span>{{else}}
+    <div class="ctr-actions">
+      <form method="post" action="/containers/projects/{{.Project}}/restart"><button class="btn small" type="submit">{{t "containers.project.restart"}}</button></form>
+      <form method="post" action="/containers/projects/{{.Project}}/stop"><button class="btn small" type="submit">{{t "containers.project.stop"}}</button></form>
+      <form method="post" action="/containers/projects/{{.Project}}/start"><button class="btn small" type="submit">{{t "containers.project.start"}}</button></form>
+    </div>{{end}}{{end}}
+  </div>
+  <div class="svc-table ctr-table">
+    {{range .Rows}}
+    <div class="svc-row ctr-row{{if not .Running}} off{{end}}">
+      <span><span class="dot {{if eq .Health "unhealthy"}}bad{{else if .Running}}ok{{else if .Ended}}muted{{else}}bad{{end}}"></span> <a class="mono" href="/containers/{{.Name}}">{{.Name}}</a></span>
+      <span class="{{if eq .Health "unhealthy"}}bad-text{{else if .Ended}}muted{{else if .Running}}ok-text{{else}}bad-text{{end}}">{{if .Ended}}{{t "containers.ended"}}{{else}}{{.Status}}{{end}}</span>
+      <span class="muted">{{with .Usage}}{{cpu .CPUPercent}} · {{bytes .MemUsed}}{{else}}—{{end}}</span>
+      <span class="muted mono">{{range $i, $p := .Ports}}{{if $i}} {{end}}{{$p}}{{else}}{{range $i, $p := .Exposed}}{{if $i}} {{end}}:{{$p}}{{end}}{{end}}</span>
+      <span class="small">{{if .Service}}<a href="/services/{{.Service}}">{{t "containers.ofservice" .ServiceName}}</a>{{else if .Linked}}<a href="/services/{{.Linked}}">{{t "others.linked" .LinkedName}}</a>{{else if eq .Locked "naru"}}<span class="muted">Naru</span>{{else if eq .Locked "webserver"}}<span class="muted">{{t "containers.webserver"}}</span>{{else if .Running}}<a href="/services/new?kind=external&amp;upstream={{.Upstream}}">{{t "others.attach"}}</a>{{if .OnlyBridge}} · <em class="warn">{{t "containers.bridge"}}</em>{{end}}{{end}}{{range .Domains}} · <span class="mono">{{.}}</span>{{end}}</span>
+    </div>
+    {{end}}
+  </div>
+</section>
+{{else}}{{if not .Data.Unreachable}}<p class="desc">{{t "containers.empty"}}</p>{{end}}{{end}}
+<p class="others-note">{{t "containers.note"}}</p>
+{{end}}

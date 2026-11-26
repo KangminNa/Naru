@@ -150,6 +150,8 @@
 |---|---|---|
 | `ServiceViewer` | 화면에 보여줄 서비스 모습(홈 카드·상세·배포 기록·로그)을 모은다. 비밀은 담지 않는다. 로그는 앱 출력과 받은 요청을 시간순으로 합친다 (M6-2) | `serviceViewer` |
 | `ContainerFinder` | Naru가 띄우지 않은, 이 서버의 다른 컨테이너를 찾는다 — 홈의 목록(compose 묶음별, 어느 외부 연결 서비스가 보내는지, 기본 bridge에만 있는지), 외부 연결 칸의 제안, 저장소로 옮길 때 채울 값(환경 변수는 이름만). **보기만 한다** | `containerFinder` |
+| `ContainerBoard` | 컨테이너 화면 — 이 서버의 **모든** 컨테이너(compose 묶음별, 상태·상태 검사·CPU/메모리·포트·보내는 주소), 상세(환경 변수는 **이름만**, 붙인 것, 상태 검사의 마지막 출력, 최근 로그 500줄과 찾기), 다시 시작·멈추기·켜기·**멈춘 것만** 지우기, 묶음 다시 시작·멈추기·켜기(한 번 돌고 끝난 것은 건드리지 않는다). Naru 자신·웹서버·Naru 서비스의 것은 `ErrProtected` | `containerBoard` |
+| `StorageBoard` | 이미지·볼륨 화면 — 크기·쓰는 컨테이너 수, 안 쓰는 것 먼저. 하나씩만 지운다(강제 없음, 쓰는 중이면 `ErrInUse`). 한꺼번에 정리(prune)는 없다 | `storageBoard` |
 | `ServerStats` | 서버의 CPU·메모리·디스크를 알려준다 | `stats.ProcSampler` |
 | `MonitorViewer` | 서버 화면 — 기간(1시간·24시간·7일·30일)의 자원 기록을 칸으로 묶은 그래프, 그 기간에 일어난 일, 서비스별 사용·다시 시작 횟수 — 과 관리 기록을 모은다 | `monitorViewer` |
 | `MetricStore` | 서버·서비스 자원 사용 기록. 1분 값 2일, 1시간 값(평균·최고) 30일 | `store.Metrics` |
@@ -183,6 +185,10 @@
 | `LogArchive` | 배포를 바꿀 때 지우는 옛 컨테이너의 앱 출력을 서비스·배포마다 압축 파일로 남기고 읽는다 — 서비스마다 최근 10개·30일, 서비스를 지우면 함께 | `files.LogArchives` |
 | `NetworkJoiner` | 컨테이너가 붙은 네트워크를 알려주고, 컨테이너를 네트워크에 붙이고 뗀다 (이미 붙어 있으면 그대로) | `docker.Containers` |
 | `UsageReader` | 컨테이너 하나의 CPU·메모리 사용량을 읽는다 (Docker stats 한 번 — 1초쯤 걸려 지켜보기 고리에서만 부른다) | `docker.Containers` |
+| `UsageBoard` | 지켜보기가 30초마다 읽은, 돌고 있는 모든 컨테이너의 CPU·메모리 (동시에 넷씩) — 컨테이너 화면이 본다 | `watch.healthWatcher` |
+| `ContainerSweeper` | 멈춘 컨테이너 하나를 지운다 — 강제하지 않는다(돌고 있으면 `ErrRunning`) | `docker.Containers` |
+| `DiskUsageReader` | 이미지·볼륨과 크기·쓰는 컨테이너 수 (`docker system df`, 몇 초) | `docker.Containers` |
+| `VolumeRemover` | 볼륨 하나를 지운다 — 강제하지 않는다(쓰는 중이면 `ErrInUse`) | `docker.Containers` |
 | `AccessLogReader` | 웹서버가 남긴 요청 기록 파일에서 그 주소들의 최근 요청을 읽는다 (파일 끝 4MB만) | `caddy.AccessLogFile` |
 | `AlertSender` | 알림 하나를 그 주소의 형식으로 보낸다 (10초 제한, 응답 본문은 읽고 버린다) | `httppost.AlertPoster` |
 | `SnippetCompiler` | 고급 칸의 Caddyfile 지시어를 웹서버 형식으로 바꾼다 — 그 사이트의 경로 처리만 꺼내고 나머지는 "적용되지 않음"으로 알린다 | `caddy.AdaptCompiler` (Caddy 관리 API `/adapt`) |
@@ -349,6 +355,10 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `ContainerDetails` | 도구가 읽은 컨테이너 하나 — 환경 변수(값 포함), 이미지가 정한 환경 변수, 볼륨, 출처 라벨. **`web`·`cli`는 이 타입을 쓸 수 없다** |
 | `EnvFrom` | 넘겨받을 때 가져올 환경 변수 — 컨테이너 이름과 고른 이름들. 값은 서비스 쪽이 Docker에서 읽어 비밀로 저장한다 (화면을 거치지 않는다) |
 | `OtherContainer` | Naru가 띄우지 않은 이 서버의 컨테이너 하나 — 이름·이미지·상태·포트·compose 묶음·사용자 정의 네트워크, 기본 bridge에만 있는지, 이 컨테이너로 보내는 외부 연결 서비스 |
+| `ContainerAction` | 컨테이너 화면의 동작 — restart · stop · start · remove(컨테이너 하나, 멈춘 것만) |
+| `ContainerRow` · `ContainerGroup` | 컨테이너 화면 한 줄(상태·상태 검사·서버에 연 포트·안에서만 연 포트·네트워크·CPU/메모리·누구의 것인지·보내는 주소·막는 이유) · compose 묶음 하나(실행 수, 묶음 동작을 막는 이유) |
+| `ContainerView` | 컨테이너 상세 — 시작 시각, 다시 시작된 횟수, 붙인 것, 환경 변수 **이름만**, 상태 검사의 마지막 출력, 최근 로그(찾은 것) |
+| `DockerDisk` · `DiskImage` · `DiskVolume` · `StorageView` | `docker system df` — 이미지(ID·태그·크기·만든 때·쓰는 컨테이너 수) · 볼륨(이름·크기·쓰는 수·compose 묶음) · 이미지·볼륨 화면(안 쓰는 크기 합) |
 | `Deployment` | 배포 한 번의 기록 |
 | `DeployStatus` | 진행 중 · 성공 · 실패 |
 | `DeployReason` | 왜 배포했나 — 직접 · push · 처음 올림 · 되돌림 |
@@ -900,11 +910,48 @@ type ContainerRemover interface {
 	Remove(ctx context.Context, name string) error
 }
 
-// ContainerSwitch는 컨테이너를 멈추고 켠다.
+// ContainerSwitch는 컨테이너를 멈추고, 켜고, 다시 시작한다.
 type ContainerSwitch interface {
 	TurnOff(ctx context.Context, name string) error
 	TurnOn(ctx context.Context, name string) error
+	Restart(ctx context.Context, name string) error
 }
+// ContainerSweeper는 멈춘 컨테이너 하나를 지운다. 강제하지 않는다 — 돌고 있으면 model.ErrRunning.
+type ContainerSweeper interface {
+	RemoveStopped(ctx context.Context, name string) error
+}
+
+// DiskUsageReader는 이미지·볼륨과 크기·쓰는 컨테이너 수를 읽는다 (docker system df — 몇 초 걸린다).
+type DiskUsageReader interface {
+	DiskUsage(ctx context.Context) (model.DockerDisk, error)
+}
+
+// VolumeRemover는 볼륨 하나를 지운다. 강제하지 않는다 — 쓰는 컨테이너가 있으면 model.ErrInUse.
+type VolumeRemover interface {
+	RemoveVolume(ctx context.Context, name string) error
+}
+
+// UsageBoard는 지켜보기가 30초마다 읽은, 돌고 있는 모든 컨테이너의 CPU·메모리다.
+type UsageBoard interface {
+	Latest(container string) (model.ResourceUsage, bool)
+}
+
+// ContainerBoard는 컨테이너 화면이다 — 이 서버의 모든 컨테이너. 보호 규칙을 여기서 지킨다:
+// Naru 자신·웹서버·Naru 서비스의 컨테이너는 model.ErrProtected, 돌고 있는 것을 지우면 model.ErrRunning.
+type ContainerBoard interface {
+	List(ctx context.Context) ([]model.ContainerGroup, error)                    // compose 묶음별·이름순. Docker를 읽지 못하면 오류
+	Detail(ctx context.Context, name, query string) (model.ContainerView, error) // 없으면 model.ErrNotFound
+	Act(ctx context.Context, name string, a model.ContainerAction) error
+	ActProject(ctx context.Context, project string, a model.ContainerAction) error // restart·stop·start만 — 끝난 일회성 컨테이너는 건드리지 않는다
+}
+
+// StorageBoard는 이미지·볼륨 화면이다. 하나씩만 지운다 — 한꺼번에 정리(prune)는 없다.
+type StorageBoard interface {
+	Disk(ctx context.Context) (model.StorageView, error)
+	RemoveImage(ctx context.Context, id model.ImageID) error // 쓰는 중이면 model.ErrInUse
+	RemoveVolume(ctx context.Context, name string) error     // 쓰는 중이면 model.ErrInUse
+}
+
 
 // ContainerWatcher는 컨테이너 상태·로그, 이 서비스의 컨테이너 목록을 본다.
 type ContainerWatcher interface {

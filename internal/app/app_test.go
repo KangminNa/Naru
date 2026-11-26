@@ -61,6 +61,7 @@ type fakeDocker struct {
 	hold    chan struct{}
 	listens map[string]model.Port // 컨테이너마다 앱이 실제로 듣는 포트 (없으면 어느 포트든 응답)
 	nets    map[string][]model.DockerNetwork
+	acts    []string // 컨테이너 화면의 동작 ("restart cairn-web-1")
 	joins   []string
 	specs   map[string]model.ContainerSpec // Naru가 띄운 것
 	details map[string]model.ContainerDetails
@@ -127,8 +128,62 @@ func (d *fakeDocker) Remove(_ context.Context, name string) error {
 	return nil
 }
 
-func (d *fakeDocker) TurnOff(context.Context, string) error { return nil }
-func (d *fakeDocker) TurnOn(context.Context, string) error  { return nil }
+func (d *fakeDocker) TurnOff(_ context.Context, name string) error {
+	return d.act("stop", name, "exited", "Exited (137) now")
+}
+func (d *fakeDocker) TurnOn(_ context.Context, name string) error {
+	return d.act("start", name, "running", "Up 1 second")
+}
+func (d *fakeDocker) Restart(_ context.Context, name string) error {
+	return d.act("restart", name, "running", "Up 1 second")
+}
+
+// act는 컨테이너 화면의 동작을 기억하고, 알던 컨테이너면 상태를 바꾼다.
+func (d *fakeDocker) act(what, name, state, status string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.acts = append(d.acts, what+" "+name)
+	if st, ok := d.states[name]; ok {
+		st.State, st.Running, st.Status = state, state == "running", status
+		d.states[name] = st
+	}
+	return nil
+}
+
+// RemoveStopped는 멈춘 것만 지운다 (ContainerSweeper).
+func (d *fakeDocker) RemoveStopped(_ context.Context, name string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	st, ok := d.states[name]
+	if !ok {
+		return model.ErrNotFound
+	}
+	if st.State == "running" {
+		return model.ErrRunning
+	}
+	delete(d.states, name)
+	d.acts = append(d.acts, "remove "+name)
+	return nil
+}
+
+// DiskUsage는 이미지 둘(하나는 안 씀)과 볼륨 둘(하나는 씀)이다.
+func (d *fakeDocker) DiskUsage(context.Context) (model.DockerDisk, error) {
+	return model.DockerDisk{
+		Images: []model.DiskImage{{ID: "sha256:0123456789abcdef", Tags: []string{"old/app:1"}, Size: 890 << 20, UsedBy: 0},
+			{ID: "sha256:fedcba9876543210", Tags: []string{"shop-web:latest"}, Size: 200 << 20, UsedBy: 1}},
+		Volumes: []model.DiskVolume{{Name: "shop_dbdata", Size: 2 << 30, UsedBy: 1, Project: "shop"}, {Name: "left_over", Size: 300 << 20}},
+	}, nil
+}
+
+func (d *fakeDocker) RemoveVolume(_ context.Context, name string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if name == "shop_dbdata" {
+		return model.ErrInUse
+	}
+	d.acts = append(d.acts, "remove-volume "+name)
+	return nil
+}
 
 func (d *fakeDocker) All(context.Context) (model.ContainerStates, error) {
 	d.mu.Lock()
@@ -324,7 +379,7 @@ func newHarnessWith(t *testing.T, o harnessOpts) *harness {
 		compose = &fakeCompose{docker: h.docker}
 	}
 	a, err := OpenWith(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), Outside{
-		Compose: compose,
+		Compose: compose, Sweeper: h.docker, Disk: h.docker, Volumes: h.docker,
 		Builder: fakeRegistry{}, Puller: fakeRegistry{}, Images: fakeImages{},
 		Starter: h.docker, Remover: h.docker, Switch: h.docker, Watcher: h.docker, Ports: h.docker, AppLogs: h.docker, Usage: h.docker, Networks: h.docker, Inspect: h.docker,
 		Code: fakeGit{}, DNS: netcheck.NewDNS(lookup), Stats: fakeStats{}, Sender: h.caddy, Certs: h.certs, Snippet: fakeSnippet{},
@@ -1394,42 +1449,59 @@ func TestTheEnvFileBoxForRepositories(t *testing.T) {
 
 // ── 이 서버의 다른 컨테이너 · 앱을 다른 네트워크에도 ──────────────
 
-func TestHomeListsTheContainersNaruDidNotStart(t *testing.T) {
+func TestHomeSumsUpAndTheContainersPageListsEverything(t *testing.T) {
 	h := newHarness(t, "")
 	h.signedIn()
 	if _, _, page := h.get("/"); strings.Contains(page, "이 서버의 다른 컨테이너") {
-		t.Fatal("nothing else is running — no list")
+		t.Fatal("nothing else is running — no summary")
 	}
 	user := func(n string) model.DockerNetwork { return model.DockerNetwork{Name: n, UserDefined: true} }
-	h.docker.set("cairn-web-1", model.ContainerState{Name: "cairn-web-1", Running: true, State: "running", Status: "Up 3 days", Ports: []model.Port{3000},
-		Project: "cairn", Networks: []model.DockerNetwork{user("cairn_default")}})
+	h.docker.set("cairn-web-1", model.ContainerState{Name: "cairn-web-1", Running: true, State: "running", Status: "Up 3 days (healthy)", Ports: []model.Port{3000},
+		Project: "cairn", ComposeService: "web", DependsOn: "migrate:service_completed_successfully:false", Networks: []model.DockerNetwork{user("cairn_default")}})
 	h.docker.set("cairn-db-1", model.ContainerState{Name: "cairn-db-1", Running: true, State: "running", Status: "Up 4 days", Ports: []model.Port{5432},
 		Project: "cairn", Networks: []model.DockerNetwork{user("cairn_default")}})
-	h.docker.set("couchdb", model.ContainerState{Name: "couchdb", Running: true, State: "running", Status: "Up 2 weeks", Ports: []model.Port{5984},
+	h.docker.set("cairn-browser-1", model.ContainerState{Name: "cairn-browser-1", Running: true, State: "running", Status: "Up 2 hours (unhealthy)",
+		Project: "cairn", Networks: []model.DockerNetwork{user("cairn_default")}})
+	h.docker.set("cairn-migrate-1", model.ContainerState{Name: "cairn-migrate-1", State: "exited", Status: "Exited (0) 4 days ago", Project: "cairn", ComposeService: "migrate"})
+	h.docker.set("couchdb", model.ContainerState{Name: "couchdb", Running: true, State: "running", Status: "Up 2 weeks", Ports: []model.Port{5984}, Published: []model.Port{5984},
 		Networks: []model.DockerNetwork{{Name: "bridge"}}})
-	h.docker.set("old-api", model.ContainerState{Name: "old-api", State: "exited", Status: "Exited (0) 5 days ago"})
-	h.docker.set("naru-caddy", model.ContainerState{Name: "naru-caddy", Running: true, State: "running"})
+	h.docker.set("old-api", model.ContainerState{Name: "old-api", State: "exited", Status: "Exited (1) 5 days ago"})
+	h.docker.set("naru-caddy", model.ContainerState{Name: "naru-caddy", Running: true, State: "running", Status: "Up 1 day", Project: "naru"})
+	h.docker.set("naru", model.ContainerState{Name: "naru", Running: true, State: "running", Status: "Up 1 day", Project: "naru"})
 
-	// Naru가 띄운 것은 목록에 없다
+	// Naru가 띄운 것
 	h.post("/services/new", url.Values{"kind": {"image"}, "source": {"me/app"}})
 	h.app.wait()
 
-	_, _, page := h.get("/")
-	for _, want := range []string{"이 서버의 다른 컨테이너", "<b>cairn</b> · compose 묶음", "따로 띄운 것", "cairn-web-1", "포트 3000 · Up 3 days · cairn_default",
-		`href="/services/new?kind=external&amp;upstream=cairn-web-1%3a3000"`, `href="/services/new?kind=external&amp;upstream=cairn-db-1%3a5432"`,
-		"기본 bridge에만 있어요", "Exited (0) 5 days ago", "끄거나 지우지 않아요"} {
-		if !strings.Contains(page, want) {
-			t.Errorf("the home page is missing %q", want)
+	// 홈은 요약만
+	_, _, home := h.get("/")
+	for _, want := range []string{"이 서버의 다른 컨테이너", "4개 실행 중", "1개 멈춤", "1개 상태 검사 실패", `href="/containers"`} {
+		if !strings.Contains(home, want) {
+			t.Errorf("the home summary is missing %q", want)
 		}
 	}
-	others := page[strings.Index(page, `class="others"`):]
-	if strings.Contains(others, "naru-app-1") || strings.Contains(others, "naru-caddy") || strings.Contains(others, "upstream=old-api") {
-		t.Fatal("Naru's own containers are not listed, and a stopped one gets no button")
-	}
-	if strings.Contains(others, "<form") || strings.Contains(others, "delete") || strings.Contains(others, "stop") {
-		t.Fatal("the list is view only")
+	if strings.Contains(home, "cairn-web-1") {
+		t.Fatal("the full list moved to the containers page")
 	}
 
+	_, _, page := h.get("/containers")
+	for _, want := range []string{"cairn", "compose 묶음 · 4개 · 3개 실행 중", "따로 띄운 것", `href="/containers/cairn-web-1"`, "Up 3 days (healthy)",
+		`href="/services/new?kind=external&amp;upstream=cairn-web-1%3a3000"`, "기본 bridge에만 있어요", "Exited (1) 5 days ago", "끝남 (0)",
+		`action="/containers/projects/cairn/restart"`, "Naru 자신이 든 묶음", "naru-app-1", "app 서비스"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the containers page is missing %q", want)
+		}
+	}
+	if strings.Contains(page, `action="/containers/projects/naru/`) {
+		t.Fatal("Naru's own project has no project buttons")
+	}
+
+	// 붙이고 나면 버튼 대신 어느 서비스가 보내는지
+	h.post("/services/new", url.Values{"kind": {"external"}, "upstream": {"cairn-web-1:3000"}, "name": {"cairn"}})
+	_, _, page = h.get("/containers")
+	if !strings.Contains(page, "cairn 서비스가 여기로 보내요") || strings.Contains(page, "upstream=cairn-web-1%3a3000") {
+		t.Fatal("a linked container shows its service instead of the button")
+	}
 	// [주소 붙이기]는 외부 연결 화면을 채워서 연다
 	_, _, form := h.get("/services/new?kind=external&upstream=cairn-web-1:3000")
 	if !strings.Contains(form, `name="upstream" value="cairn-web-1:3000"`) {
@@ -1438,11 +1510,101 @@ func TestHomeListsTheContainersNaruDidNotStart(t *testing.T) {
 	if _, _, form := h.get("/services/new?kind=external&upstream=" + url.QueryEscape(`"><script>`)); strings.Contains(form, "<script>") && !strings.Contains(form, `name="upstream" value=""`) {
 		t.Fatal("only a well-formed address is filled in")
 	}
-	// 붙이고 나면 버튼 대신 어느 서비스가 보내는지
-	h.post("/services/new", url.Values{"kind": {"external"}, "upstream": {"cairn-web-1:3000"}, "name": {"cairn"}})
-	_, _, page = h.get("/")
-	if !strings.Contains(page, "cairn 서비스가 여기로 보내요") || strings.Contains(page, "upstream=cairn-web-1%3a3000") {
-		t.Fatal("a linked container shows its service instead of the button")
+}
+
+// 컨테이너 화면의 동작 — 보호 규칙, 지우기 확인, 묶음은 끝난 일회성 컨테이너를 다시 돌리지 않는다, 관리 기록.
+func TestContainerActionsAndTheirGuards(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	h.docker.set("cairn-web-1", model.ContainerState{Name: "cairn-web-1", Running: true, State: "running", Status: "Up 3 days", Project: "cairn",
+		ComposeService: "web", DependsOn: "migrate:service_completed_successfully:false"})
+	h.docker.set("cairn-worker-1", model.ContainerState{Name: "cairn-worker-1", State: "exited", Status: "Exited (137) 1 hour ago", Project: "cairn"})
+	h.docker.set("cairn-migrate-1", model.ContainerState{Name: "cairn-migrate-1", State: "exited", Status: "Exited (0) 4 days ago", Project: "cairn", ComposeService: "migrate"})
+	h.docker.set("old-api", model.ContainerState{Name: "old-api", State: "exited", Status: "Exited (1) 5 days ago"})
+	h.docker.set("naru-caddy", model.ContainerState{Name: "naru-caddy", Running: true, State: "running"})
+	h.docker.details = map[string]model.ContainerDetails{"cairn-web-1": {Env: []string{"DB_PASSWORD=hunter2", "TZ=Asia/Seoul"}, Binds: []string{"/srv/up:/up:ro"},
+		NamedVolumes: []string{"cairn_cache:/cache"}, Health: "healthy", Restarts: 2}}
+
+	_, _, page := h.get("/containers/cairn-web-1")
+	for _, want := range []string{"DB_PASSWORD", "TZ", "/srv/up → /up (ro)", "cairn_cache (volume) → /cache", "cairn-web-1 listening on :80", `action="/containers/cairn-web-1/restart"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the detail is missing %q", want)
+		}
+	}
+	if strings.Contains(page, "hunter2") || strings.Contains(page, "Asia/Seoul") {
+		t.Fatal("env values never reach the page")
+	}
+	if _, _, page := h.get("/containers/cairn-web-1?q=script"); !strings.Contains(page, "alert(1)") || strings.Contains(page, "listening on") || strings.Contains(page, "<script>alert") {
+		t.Fatal("log search filters, and log text is escaped")
+	}
+	if code, _, _ := h.get("/containers/nope"); code != http.StatusNotFound {
+		t.Fatal("unknown container")
+	}
+
+	if code, loc, _ := h.post("/containers/cairn-web-1/restart", nil); code != http.StatusSeeOther || !strings.Contains(loc, "ok=restart") {
+		t.Fatalf("%d %s", code, loc)
+	}
+	if _, loc, _ := h.post("/containers/naru-caddy/stop", nil); !strings.Contains(loc, "err=protected") {
+		t.Fatalf("the web server is protected: %s", loc)
+	}
+	if _, loc, _ := h.post("/containers/cairn-web-1/remove", url.Values{"confirm": {"cairn-web-1"}}); !strings.Contains(loc, "err=running") {
+		t.Fatalf("a running one is not removed: %s", loc)
+	}
+	if _, loc, _ := h.post("/containers/old-api/remove", url.Values{"confirm": {"old"}}); !strings.Contains(loc, "err=confirm") {
+		t.Fatalf("the name must match: %s", loc)
+	}
+	if _, loc, _ := h.post("/containers/old-api/remove", url.Values{"confirm": {"old-api"}}); !strings.Contains(loc, "ok=removed") {
+		t.Fatalf("%s", loc)
+	}
+	if _, loc, _ := h.post("/containers/old-api/explode", nil); !strings.Contains(loc, "err=action") {
+		t.Fatalf("%s", loc)
+	}
+
+	h.docker.mu.Lock()
+	h.docker.acts = nil
+	h.docker.mu.Unlock()
+	if _, loc, _ := h.post("/containers/projects/cairn/start", nil); !strings.Contains(loc, "ok=project-start") {
+		t.Fatalf("%s", loc)
+	}
+	h.docker.mu.Lock()
+	acts := strings.Join(h.docker.acts, ",")
+	h.docker.mu.Unlock()
+	if acts != "start cairn-worker-1" {
+		t.Fatalf("only the stopped worker starts — the finished migration is not rerun: %s", acts)
+	}
+
+	// 관리 기록
+	_, _, settings := h.get("/settings")
+	for _, want := range []string{"cairn-web-1 컨테이너를 다시 시작했어요", "old-api 컨테이너를 지웠어요", "cairn 묶음을 켰어요"} {
+		if !strings.Contains(settings, want) {
+			t.Errorf("the activity log is missing %q", want)
+		}
+	}
+}
+
+func TestStoragePageDeletesOneAtATime(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	_, _, page := h.get("/storage")
+	for _, want := range []string{"old/app:1", "0123456789ab", "안 씀", "컨테이너 1개가 씀", "shop_dbdata", "left_over", "안 쓰는 이미지 890.0 MB"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the storage page is missing %q", want)
+		}
+	}
+	if strings.Contains(page, `action="/storage/images/sha256:fedcba9876543210/delete"`) || strings.Contains(page, `action="/storage/volumes/shop_dbdata/delete"`) {
+		t.Fatal("used ones have no delete form")
+	}
+	if _, loc, _ := h.post("/storage/volumes/left_over/delete", url.Values{"confirm": {"left"}}); !strings.Contains(loc, "err=confirm") {
+		t.Fatalf("%s", loc)
+	}
+	if _, loc, _ := h.post("/storage/volumes/left_over/delete", url.Values{"confirm": {"left_over"}}); !strings.Contains(loc, "ok=volume-removed") {
+		t.Fatalf("%s", loc)
+	}
+	if _, loc, _ := h.post("/storage/volumes/shop_dbdata/delete", url.Values{"confirm": {"shop_dbdata"}}); !strings.Contains(loc, "err=inuse") {
+		t.Fatalf("Docker refuses a volume in use: %s", loc)
+	}
+	if _, loc, _ := h.post("/storage/images/sha256:0123456789abcdef/delete", url.Values{"confirm": {"0123456789ab"}}); !strings.Contains(loc, "ok=image-removed") {
+		t.Fatalf("%s", loc)
 	}
 }
 
@@ -1703,8 +1865,8 @@ func TestMovingARunningContainerToARepository(t *testing.T) {
 	if code, _, _ := h.post("/services/1/web", url.Values{"headers": {"X-Frame-Options: DENY"}}); code != http.StatusSeeOther {
 		t.Fatalf("%d", code)
 	}
-	if _, _, page := h.get("/"); !strings.Contains(page, `href="/services/new?kind=repo&amp;adopt=cairn-web-1"`) {
-		t.Fatal("a running container has the move button, linked or not")
+	if _, _, page := h.get("/containers/cairn-web-1"); !strings.Contains(page, `href="/services/new?kind=repo&amp;adopt=cairn-web-1"`) || strings.Contains(page, "hunter2") {
+		t.Fatal("a running container has the move button, linked or not — and its env values stay off the page")
 	}
 
 	// 화면: 읽은 값으로 채워져 있고, 환경 변수는 이름만
@@ -2058,7 +2220,7 @@ func (fakeCompose) Build(_ context.Context, p model.ComposeProject, _ io.Writer)
 
 func (f *fakeCompose) Up(_ context.Context, p model.ComposeProject, _ io.Writer) error {
 	for svc, st := range map[string]model.ContainerState{
-		"web":     {State: "running", Running: true, Status: "Up 1 second", Ports: []model.Port{3000}},
+		"web":     {State: "running", Running: true, Status: "Up 1 second", Ports: []model.Port{3000}, DependsOn: "migrate:service_completed_successfully:false"},
 		"worker":  {State: "running", Running: true, Status: "Up 1 second"},
 		"migrate": {State: "exited", Status: "Exited (0) 2 seconds ago"},
 	} {

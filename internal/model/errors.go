@@ -43,6 +43,9 @@ var (
 	ErrNoIndexHTML     = errors.New("no index.html in that folder")
 	ErrNoDockerfile    = errors.New("no Dockerfile")
 	ErrUnknownPort     = errors.New("unknown app port")
+	ErrInUse           = errors.New("in use by a container")                              // 쓰는 컨테이너가 있어 지울 수 없다
+	ErrRunning         = errors.New("running")                                            // 돌고 있어서 지울 수 없다
+	ErrProtected       = errors.New("protected — Naru, the web server or a Naru service") // 컨테이너 화면에서는 다루지 않는다
 )
 
 // MinPasswordLength는 비밀번호의 최소 길이다.

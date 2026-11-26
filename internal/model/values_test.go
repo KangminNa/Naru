@@ -396,10 +396,42 @@ func TestComposeValues(t *testing.T) {
 	if (ComposeProject{Name: "naru-shop"}).Container("web") != "naru-shop-web-1" {
 		t.Fatal("compose names containers <project>-<service>-1")
 	}
-	if !(ContainerState{State: "exited", Status: "Exited (0) 2 minutes ago"}).Ended() || (ContainerState{State: "exited", Status: "Exited (1) now"}).Ended() {
-		t.Fatal("only a clean exit is a finished one-off")
+	// 한 번 도는 것 = 다른 서비스가 service_completed_successfully로 기다리는 것. 멈추라고 해서 0으로 끝난 DB는 아니다.
+	cs := ContainerStates{
+		"shop-migrate-1": {State: "exited", Status: "Exited (0) 2 minutes ago", Project: "shop", ComposeService: "migrate"},
+		"shop-db-1":      {State: "exited", Status: "Exited (0) 1 minute ago", Project: "shop", ComposeService: "db"},
+		"shop-seed-1":    {State: "exited", Status: "Exited (1) now", Project: "shop", ComposeService: "seed"},
+		"shop-server-1": {State: "running", Status: "Up", Project: "shop", ComposeService: "server",
+			DependsOn: "db:service_started:false,migrate:service_completed_successfully:false,seed:service_completed_successfully:true"},
+		"other-migrate-1": {State: "exited", Status: "Exited (0) now", Project: "other", ComposeService: "migrate"},
+	}
+	if !cs.Finished("shop-migrate-1") || cs.Finished("shop-db-1") || cs.Finished("shop-seed-1") || cs.Finished("shop-server-1") || cs.Finished("other-migrate-1") || cs.Finished("nope") {
+		t.Fatal("only a clean exit of something others wait to complete is a finished one-off")
 	}
 	if !IsCommitHash("a1b2c3d4e5f6") || IsCommitHash("--upload-pack=x") || IsCommitHash("main") {
 		t.Fatal("commit hashes only")
+	}
+}
+
+func TestContainerScreenValues(t *testing.T) {
+	for in, want := range map[string]string{"Up 2 hours (unhealthy)": "unhealthy", "Up 3 days (healthy)": "healthy", "Up 5 seconds (health: starting)": "starting", "Up 1 hour": ""} {
+		if got := HealthOf(in); got != want {
+			t.Errorf("%q → %q", in, got)
+		}
+	}
+	if !EndedOK("exited", "Exited (0) 3 days ago") || EndedOK("exited", "Exited (1) 3 days ago") || EndedOK("running", "Up 1 hour") {
+		t.Fatal("only a clean exit is a finished one-off")
+	}
+	if a, err := ParseContainerAction("restart"); err != nil || a != ActRestart {
+		t.Fatal(a, err)
+	}
+	if _, err := ParseContainerAction("kill"); err == nil {
+		t.Fatal("unknown action")
+	}
+	if ShortImageID("sha256:0123456789abcdef") != "0123456789ab" || ShortImageID("abc") != "abc" {
+		t.Fatal("short id")
+	}
+	if (ContainerRow{Name: "web", Exposed: []Port{3000}, Ports: []Port{8080}}).Upstream() != "web:3000" || (ContainerRow{Name: "db"}).Upstream() != "db:" {
+		t.Fatal("upstream prefers the inside port")
 	}
 }

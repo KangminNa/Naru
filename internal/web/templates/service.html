@@ -253,7 +253,7 @@
 
 <section class="section danger" id="delete">
   <h2>{{t "service.delete"}}</h2>
-  <p class="desc">{{t "service.delete.desc"}}</p>
+  <p class="desc">{{t "service.delete.desc"}}{{if eq $s.Kind "compose"}} {{t "service.delete.compose"}}{{end}}</p>
   {{if eq .Data.Form "delete"}}{{template "error" .}}{{end}}
   <form method="post" action="/services/{{$id}}/delete" class="inline-form">
     <input class="input mono" name="confirm" placeholder="{{$s.Name}}" aria-label="{{t "service.delete.confirm" $s.Name}}" autocomplete="off">

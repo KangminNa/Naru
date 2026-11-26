@@ -2102,7 +2102,7 @@ func TestComposeFromTheScreen(t *testing.T) {
 	}
 
 	_, _, page = h.get("/services/1")
-	for _, want := range []string{"compose가 띄운 것", `<span class="mono">worker</span>`, "끝남 (0)", `action="/services/1/domains/`} {
+	for _, want := range []string{"compose가 띄운 것", `<span class="mono">worker</span>`, "끝남 (0)", `action="/services/1/domains/`, "저장소에서 온 파일만 지워요"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("service page shows %q", want)
 		}

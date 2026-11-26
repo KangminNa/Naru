@@ -317,39 +317,80 @@ func TestLogArchivesKeepTenAndThirtyDays(t *testing.T) {
 	}
 }
 
-func TestProjectFoldersStayAndSwap(t *testing.T) {
+func TestProjectFoldersUpdateInPlaceAndKeepData(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "compose")
 	p := NewProjectFolders(root)
 	shop, _ := model.ParseServiceName("shop")
-	deploy := func(body, commit string, env string) string {
+	deploy := func(files map[string]string, commit string, env string) string {
+		t.Helper()
 		fresh, err := p.Fresh(shop)
 		if err != nil {
 			t.Fatal(err)
 		}
-		write(t, fresh, map[string]string{"compose.yml": body, ".git/config": "[remote]"})
+		files[".git/config"] = "[remote]"
+		write(t, fresh, files)
 		dir, err := p.Promote(shop, fresh, []byte(env), model.Commit{Hash: commit})
 		if err != nil {
 			t.Fatal(err)
 		}
+		if _, err := os.Stat(fresh); err == nil {
+			t.Fatal("the download folder goes away")
+		}
 		return dir
 	}
-	dir := deploy("v1", "aaa111", "SECRET=1\n")
-	if dir != filepath.Join(root, "shop") || p.Dir(shop) != dir || p.Commit(shop) != "aaa111" {
+	read := func(dir, name string) string { b, _ := os.ReadFile(filepath.Join(dir, name)); return string(b) }
+	gone := func(dir, name string) bool { _, err := os.Lstat(filepath.Join(dir, name)); return os.IsNotExist(err) }
+
+	dir := deploy(map[string]string{"compose.yml": "v1", "conf/app.toml": "a=1", "old/notes.txt": "x", "run.sh": "#!/bin/sh"}, "aaa111", "SECRET=1\n")
+	os.Chmod(filepath.Join(dir, "run.sh"), 0o755)
+	if dir != filepath.Join(root, "shop") || p.Dir(shop) != dir || p.Commit(shop) != "aaa111" || read(dir, "compose.yml") != "v1" {
 		t.Fatalf("%s %s", dir, p.Commit(shop))
 	}
 	if info, err := os.Stat(filepath.Join(dir, ".env")); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf(".env is private: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+	if !gone(dir, ".git") {
 		t.Fatal("no .git left behind")
 	}
-	deploy("v2", "bbb222", "")
-	if b, _ := os.ReadFile(filepath.Join(dir, "compose.yml")); string(b) != "v2" || p.Commit(shop) != "bbb222" {
-		t.Fatal("the same path now holds the new code")
+
+	// 컨테이너가 작업 폴더에 데이터를 쓴다 (./docker-data/mail:/var/mail 같은 상대 경로 볼륨)
+	write(t, dir, map[string]string{"docker-data/mail/inbox/1.eml": "hello", "conf/runtime.cache": "c"})
+	dataDir, _ := os.Stat(filepath.Join(dir, "docker-data"))
+	conf, _ := os.Stat(filepath.Join(dir, "conf/app.toml"))
+
+	deploy(map[string]string{"compose.yml": "v2", "conf/app.toml": "a=2", "run.sh": "#!/bin/sh\necho 2", "new.txt": "n"}, "bbb222", "")
+	if read(dir, "compose.yml") != "v2" || read(dir, "conf/app.toml") != "a=2" || read(dir, "new.txt") != "n" || p.Commit(shop) != "bbb222" {
+		t.Fatal("the code is updated in the same folder")
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".env")); err == nil {
-		t.Fatal("an empty .env box writes no file")
+	if read(dir, "docker-data/mail/inbox/1.eml") != "hello" || read(dir, "conf/runtime.cache") != "c" {
+		t.Fatal("what the containers wrote stays")
 	}
+	if now, _ := os.Stat(filepath.Join(dir, "docker-data")); !os.SameFile(dataDir, now) {
+		t.Fatal("a mounted data folder is the very same folder — a running container keeps writing where we see it")
+	}
+	if now, _ := os.Stat(filepath.Join(dir, "conf/app.toml")); !os.SameFile(conf, now) {
+		t.Fatal("a mounted file is rewritten in place — the container sees the new content")
+	}
+	if !gone(dir, "old/notes.txt") || !gone(dir, "old") {
+		t.Fatal("files removed from the repository go, with their now-empty folder")
+	}
+	if !gone(dir, ".env") {
+		t.Fatal("an emptied .env box removes the .env Naru wrote")
+	}
+
+	// 저장소의 .env는 저장소 것 — 칸이 비면 그대로 둔다
+	deploy(map[string]string{"compose.yml": "v3", ".env": "FROM_REPO=1"}, "ccc333", "")
+	if read(dir, ".env") != "FROM_REPO=1" {
+		t.Fatal("a committed .env is the repository's")
+	}
+
+	// 예전 Naru가 만든 폴더(목록 없음) — 아무것도 지우지 않는다
+	os.Remove(filepath.Join(dir, ".naru-files"))
+	deploy(map[string]string{"compose.yml": "v4"}, "ddd444", "")
+	if read(dir, ".env") != "FROM_REPO=1" || !gone(dir, "new.txt") {
+		t.Fatal("without a list, nothing is deleted (new.txt left with v3 already)")
+	}
+
 	left, _ := filepath.Glob(filepath.Join(root, ".*"))
 	os.MkdirAll(filepath.Join(root, ".shop-stale"), 0o700)
 	p.Fresh(shop)
@@ -359,11 +400,55 @@ func TestProjectFoldersStayAndSwap(t *testing.T) {
 	if _, err := p.Promote(shop, "/tmp/elsewhere", nil, model.Commit{}); err == nil {
 		t.Fatal("only folders it made")
 	}
-	p.Remove(shop)
-	if _, err := os.Stat(dir); err == nil {
-		t.Fatal("removed")
+
+	// 지우기 — 저장소에서 온 것만. 컨테이너가 쓴 데이터는 남는다
+	deploy(map[string]string{"compose.yml": "v5", "conf/app.toml": "a=5"}, "eee555", "K=1")
+	if err := p.Remove(shop); err != nil {
+		t.Fatal(err)
+	}
+	if !gone(dir, "compose.yml") || !gone(dir, ".env") || !gone(dir, ".naru-commit") || !gone(dir, ".naru-files") || !gone(dir, "conf/app.toml") {
+		t.Fatal("the repository's files go")
+	}
+	if read(dir, "docker-data/mail/inbox/1.eml") != "hello" {
+		t.Fatal("the data stays — the person deletes it")
+	}
+	// 데이터가 없으면 폴더째 사라진다
+	tiny, _ := model.ParseServiceName("tiny")
+	fresh, _ := p.Fresh(tiny)
+	write(t, fresh, map[string]string{"compose.yml": "x", "a/b.txt": "y"})
+	tdir, _ := p.Promote(tiny, fresh, nil, model.Commit{Hash: "fff666"})
+	p.Remove(tiny)
+	if _, err := os.Stat(tdir); !os.IsNotExist(err) {
+		t.Fatal("an empty folder goes")
 	}
 	if _, err := NewProjectFolders("").Fresh(shop); err == nil {
 		t.Fatal("no root, no compose")
+	}
+}
+
+// 저장소의 심볼릭 링크는 링크로 둔다. 목록이 망가져도 작업 폴더 밖은 지우지 않는다.
+func TestProjectFoldersStayInside(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "compose")
+	outside := filepath.Join(t.TempDir(), "keep.txt")
+	os.WriteFile(outside, []byte("k"), 0o644)
+	p := NewProjectFolders(root)
+	shop, _ := model.ParseServiceName("shop")
+	fresh, _ := p.Fresh(shop)
+	write(t, fresh, map[string]string{"compose.yml": "x"})
+	os.Symlink("compose.yml", filepath.Join(fresh, "docker-compose.yml"))
+	dir, err := p.Promote(shop, fresh, nil, model.Commit{Hash: "aaa111"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l, err := os.Readlink(filepath.Join(dir, "docker-compose.yml")); err != nil || l != "compose.yml" {
+		t.Fatalf("%q %v", l, err)
+	}
+	// 누가 목록에 바깥 경로를 적어도
+	os.WriteFile(filepath.Join(dir, ".naru-files"), []byte("compose.yml\n../../keep.txt\n"+outside+"\n"), 0o600)
+	os.Symlink(filepath.Dir(outside), filepath.Join(dir, "link"))
+	os.WriteFile(filepath.Join(dir, ".naru-files"), []byte("compose.yml\n../../keep.txt\n"+outside+"\nlink/keep.txt\n"), 0o600)
+	p.Remove(shop)
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatal("nothing outside the work folder is touched")
 	}
 }

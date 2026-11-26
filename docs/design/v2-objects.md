@@ -188,7 +188,7 @@
 | `SnippetCompiler` | 고급 칸의 Caddyfile 지시어를 웹서버 형식으로 바꾼다 — 그 사이트의 경로 처리만 꺼내고 나머지는 "적용되지 않음"으로 알린다 | `caddy.AdaptCompiler` (Caddy 관리 API `/adapt`) |
 | `ContainerInspector` | 컨테이너 하나의 환경 변수·볼륨·출처 라벨을 읽는다 (값은 비밀 — 화면 계층은 쓰지 않는다) | `docker.Containers` |
 | `ComposeRunner` | Naru 이미지 안의 `docker compose`(`docker/compose-bin`에서 버전 고정)로 build·up·start/stop·down. Naru의 환경 변수는 물려주지 않는다 | `docker.ComposeCLI` |
-| `ProjectFolders` | Compose 작업 폴더 — 서비스마다 하나, 배포 사이에도 남는다. 새 폴더에 받아 `.env`(600)·커밋 표시를 쓰고 바꿔 끼운다 | `files.ProjectFolderSet` |
+| `ProjectFolders` | Compose 작업 폴더 — 서비스마다 하나, 배포 사이에도 같은 폴더. 받은 코드를 그 자리에 맞춘다(저장소 파일만 덮어쓰고 지운다, 컨테이너가 쓴 데이터는 그대로). `.env`(600)·커밋 표시 | `files.ProjectFolderSet` |
 | `DomainMover` | 한 서비스의 주소와 웹서버 설정을 다른 서비스로 한 트랜잭션에 옮긴다 | `store.DomainMoves` |
 | `CodeDownloader` | 저장소 코드를 내려받는다 (토큰은 인자·설정 파일에 남기지 않는다) | `git.Downloader` |
 | `WorkFolder` | 잠깐 쓸 작업 폴더를 빌려주고 돌려받는다. 그 안의 경로를 심볼릭 링크로 빠져나가지 않게 찾아 준다 | `files.TempFolders` |
@@ -971,10 +971,10 @@ type ComposeRunner interface {
 // 서버와 Naru 컨테이너에서 같은 경로로 보여야 한다.
 type ProjectFolders interface {
 	Fresh(s model.ServiceName) (string, error)                                         // 코드를 받을 빈 폴더 (같은 디스크)
-	Promote(s model.ServiceName, fresh string, env []byte, c model.Commit) (string, error) // .env(600)·커밋 표시를 쓰고 작업 폴더로 바꿔 끼운다
+	Promote(s model.ServiceName, fresh string, env []byte, c model.Commit) (string, error) // 작업 폴더에 그 자리에서 맞춘다 — 저장소 파일만 바꾸고 지운다. .env(600)·커밋 표시
 	Commit(s model.ServiceName) string                                                  // 지금 작업 폴더의 커밋 (없으면 빈 값)
 	Dir(s model.ServiceName) string                                                     // 작업 폴더 경로
-	Remove(s model.ServiceName) error
+	Remove(s model.ServiceName) error                                                      // 저장소에서 온 파일만 지운다 — 컨테이너가 쓴 데이터는 남는다
 }
 
 // ContainerInspector는 컨테이너 하나의 환경 변수·볼륨·출처를 읽는다. 환경 변수 값은 비밀이다 — web·cli는 쓰지 않는다 (R10).

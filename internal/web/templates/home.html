@@ -1,23 +1,34 @@
 {{define "root"}}{{template "app" .}}{{end}}
 {{define "title"}}{{t "nav.services"}}{{end}}
-{{define "content"}}
-<div class="hero row">
+{{define "content"}}{{$d := .Data}}
+<div class="page-head">
   <div>
     <h1>{{t "home.heading"}}</h1>
-    <p>{{if .Data.Services}}{{t "home.count" (len .Data.Services)}}{{else}}{{t "home.empty.sub"}}{{end}}</p>
+    <p>{{if $d.Services}}{{t "home.count" (len $d.Services)}}{{else}}{{t "home.empty.sub"}}{{end}}</p>
   </div>
-  <a class="btn primary" href="/services/new">+ {{t "home.new"}}</a>
+  <a class="btn primary" href="/services/new">{{template "icon-plus"}}{{t "home.new"}}</a>
 </div>
 
-{{if .Data.Attention}}
+<div class="tiles">
+  <div class="tile"><span>{{t "home.tile.services"}}</span><b>{{$d.Healthy}}<small> / {{len $d.Services}} {{t "home.tile.ok"}}</small></b></div>
+  <div class="tile{{if $d.Attention}} bad{{end}}"><span>{{t "home.attention"}}</span><b>{{len $d.Attention}}</b></div>
+  {{with $d.Host}}
+  <a class="tile" href="/server"><span>CPU · {{t "home.cores" .Cores}}</span><b>{{if .HasCPU}}{{pct .CPUPercent}}{{else}}—{{end}}</b>{{if .HasCPU}}<progress class="meter wide" max="100" value="{{printf "%.0f" .CPUPercent}}"></progress>{{end}}</a>
+  <a class="tile" href="/server"><span>{{t "home.memory"}}</span><b>{{if .HasMem}}{{bytes .MemUsed}}<small> / {{bytes .MemTotal}}</small>{{else}}—{{end}}</b>{{if .HasMem}}<progress class="meter wide" max="{{.MemTotal}}" value="{{.MemUsed}}"></progress>{{end}}</a>
+  <a class="tile" href="/server"><span>{{t "home.disk"}} {{t "home.free"}}</span><b>{{if .HasDisk}}{{bytes .DiskFree}}{{else}}—{{end}}</b></a>
+  {{end}}
+  <a class="tile{{if or $d.OtherStopped $d.OtherSick}} warn{{end}}" href="/containers"><span>{{t "home.tile.containers"}}</span><b>{{$d.OtherRunning}}<small> / {{$d.OtherCount}} {{t "home.tile.running"}}</small></b></a>
+</div>
+
+{{if $d.Attention}}
 <section class="attention" aria-labelledby="attention-h">
-  <h2 id="attention-h">{{t "home.attention"}} <span class="count">{{len .Data.Attention}}</span></h2>
-  <ul class="findings">{{range .Data.Attention}}{{template "finding" .}}{{end}}</ul>
+  <h2 id="attention-h">{{t "home.attention"}} <span class="count">{{len $d.Attention}}</span></h2>
+  <ul class="findings">{{range $d.Attention}}{{template "finding" .}}{{end}}</ul>
 </section>
-{{else if .Data.Checked}}
+{{else if $d.Checked}}
 <p class="allgood"><span class="dot ok"></span>{{t "home.allgood"}}</p>
 {{end}}
-{{if not .Data.AdminDomain}}
+{{if not $d.AdminDomain}}
 <div class="notice warn">
   <span class="notice-icon">!</span>
   <div class="notice-text"><b>{{t "home.nodomain.title"}}</b><span>{{t "home.nodomain.body"}}</span></div>
@@ -25,20 +36,25 @@
 </div>
 {{end}}
 
-{{if .Data.Services}}
-<div class="grid">
-  {{range .Data.Services}}
-  <a class="svc" href="/services/{{.ID}}">
-    <div class="svc-top">
-      <span class="avatar {{.Color}}">{{.Initial}}</span>
-      <div class="svc-names"><b>{{.Name}}</b><small>{{t .KindKey}}</small></div>
-      <span class="dot {{.StateClass}}" title="{{t .StateKey}}"></span>
-    </div>
-    <div class="svc-domain">{{if .Domain}}{{.Domain}}{{else}}<span class="muted">{{t "home.noaddress"}}</span>{{end}}</div>
-    <div class="svc-foot"><span class="state {{.StateClass}}">{{t .StateKey}}</span>{{with .Detail}}<span>· {{.}}</span>{{end}}</div>
-    {{with .Usage}}<div class="svc-usage"><span>CPU <b>{{cpu .CPUPercent}}</b></span><span>{{t "home.memory"}} <b>{{bytes .MemUsed}}</b></span></div>{{end}}
-  </a>
-  {{end}}
+{{if $d.Services}}
+<div class="panel">
+  <div class="table-scroll">
+  <table class="dt svc-dt">
+    <colgroup><col><col class="c-domain"><col class="c-state"><col class="c-usage"><col class="c-go"></colgroup>
+    <thead><tr><th>{{t "home.col.service"}}</th><th>{{t "home.col.domain"}}</th><th>{{t "containers.col.state"}}</th><th>{{t "containers.col.usage"}}</th><th></th></tr></thead>
+    <tbody>
+    {{range $d.Services}}
+    <tr>
+      <td class="svc-cell"><a href="/services/{{.ID}}"><span class="avatar sm {{.Color}}">{{.Initial}}</span><span><b>{{.Name}}</b><small>{{t .KindKey}}</small></span></a></td>
+      <td class="link">{{if .Domain}}<span class="domain">{{.Domain}}</span>{{else}}<span class="muted small">{{t "home.noaddress"}}</span>{{end}}</td>
+      <td><span class="badge {{if eq .StateClass "ok"}}ok{{else if eq .StateClass "bad"}}bad{{else if eq .StateClass "warn"}}warn{{else}}muted{{end}}">{{t .StateKey}}</span>{{with .Detail}}<span class="since">{{.}}</span>{{end}}</td>
+      <td class="num">{{with .Usage}}{{cpu .CPUPercent}} <span class="muted">· {{bytes .MemUsed}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="go"><a class="btn tiny quiet" href="/services/{{.ID}}" aria-label="{{.Name}}">→</a></td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
 </div>
 {{else}}
 <a class="empty" href="/services/new">
@@ -47,27 +63,14 @@
 </a>
 {{end}}
 
-{{if .Data.OtherCount}}
-<section class="others" aria-labelledby="others-h">
-  <div class="others-head">
-    <h2 id="others-h">{{t "others.title"}} <span class="count">{{.Data.OtherCount}}</span></h2>
-    <span class="muted">{{t "others.summary" .Data.OtherRunning}}{{if .Data.OtherStopped}} · <span class="bad-text">{{t "others.stopped" .Data.OtherStopped}}</span>{{end}}{{if .Data.OtherSick}} · <span class="bad-text">{{t "others.sick" .Data.OtherSick}}</span>{{end}}</span>
-    <a class="btn small" href="/containers">{{t "others.open"}}</a>
-  </div>
-</section>
-{{end}}
-
-{{with .Data.Host}}
-<div class="server">
-  <span class="server-title"><span class="dot ok"></span><b>{{t "home.server"}}</b></span>
-  <span>CPU <b>{{if .HasCPU}}{{pct .CPUPercent}}{{else}}—{{end}}</b>{{if .HasCPU}}<progress class="meter" max="100" value="{{printf "%.0f" .CPUPercent}}"></progress>{{end}}</span>
-  <span>{{t "home.memory"}} <b>{{if .HasMem}}{{bytes .MemUsed}}{{else}}—{{end}}</b>{{if .HasMem}} / {{bytes .MemTotal}}<progress class="meter" max="{{.MemTotal}}" value="{{.MemUsed}}"></progress>{{end}}</span>
-  <span>{{t "home.disk"}} <b>{{if .HasDisk}}{{bytes .DiskFree}}{{else}}—{{end}}</b> {{if .HasDisk}}{{t "home.free"}}{{end}}</span>
-  <span class="muted">{{t "home.cores" .Cores}}{{if .HasLoad}} · {{t "home.load" (printf "%.2f" .Load1)}}{{end}}</span>
-</div>
-{{end}}
-<div class="server slim">
-  <span class="server-title"><span class="dot {{if .Data.Engine.Connected}}ok{{else}}bad{{end}}"></span><b>{{t "home.engine"}}</b></span>
-  <span>{{if .Data.Engine.Connected}}{{t "home.engine.ok"}}{{else}}{{t "home.engine.down"}}{{end}}</span>
+<div class="home-foot">
+  {{if $d.OtherCount}}
+  <a class="foot-item" href="/containers" aria-labelledby="others-h">{{template "icon-box"}}<b id="others-h">{{t "others.title"}} {{$d.OtherCount}}</b>
+    <span class="muted">{{t "others.summary" $d.OtherRunning}}{{if $d.OtherStopped}} · <span class="bad-text">{{t "others.stopped" $d.OtherStopped}}</span>{{end}}{{if $d.OtherSick}} · <span class="bad-text">{{t "others.sick" $d.OtherSick}}</span>{{end}}</span>
+    <span class="tag-link">{{t "others.open"}}</span></a>
+  {{end}}
+  <span class="foot-item"><span class="dot {{if $d.Engine.Connected}}ok{{else}}bad{{end}}"></span><b>{{t "home.engine"}}</b>
+    <span class="muted">{{if $d.Engine.Connected}}{{t "home.engine.ok"}}{{else}}{{t "home.engine.down"}}{{end}}</span></span>
+  {{with $d.Host}}{{if .HasLoad}}<span class="foot-item muted">{{t "home.load" (printf "%.2f" .Load1)}}</span>{{end}}{{end}}
 </div>
 {{end}}

@@ -3,26 +3,35 @@
 {{define "content"}}
 {{$s := .Data.Service}}{{$c := .Data.Card}}{{$id := $s.ID}}
 <a class="back" href="/">← {{t "service.back"}}</a>
-<div class="detail-head">
+<div class="c-head">
   <span class="avatar big {{$c.Color}}">{{$c.Initial}}</span>
-  <div>
+  <div class="c-title svc-title">
     <h1>{{$s.Name}}</h1>
-    <div class="sub"><span>{{t $c.KindKey}}</span>{{with $c.Domain}}<span>·</span><a class="ext" href="http://{{.}}" target="_blank" rel="noopener">{{.}} ↗</a>{{end}}</div>
+    <div class="sub"><span class="badge {{if eq $c.StateClass "ok"}}ok{{else if eq $c.StateClass "bad"}}bad{{else if eq $c.StateClass "warn"}}warn{{else}}muted{{end}}">{{t $c.StateKey}}</span><span class="muted">{{t $c.KindKey}}</span>{{with $c.Domain}}<a class="ext" href="http://{{.}}" target="_blank" rel="noopener">{{.}} ↗</a>{{end}}</div>
   </div>
   <div class="head-actions">
     {{if $.Data.Container}}
       {{if $s.Live.Stopped}}
-      <form method="post" action="/services/{{$id}}/start"><button class="btn" type="submit">{{t "service.start"}}</button></form>
+      <form method="post" action="/services/{{$id}}/start"><button class="btn small" type="submit">{{template "icon-play"}}{{t "service.start"}}</button></form>
       {{else}}
-      <form method="post" action="/services/{{$id}}/stop"><button class="btn" type="submit">{{t "service.stop"}}</button></form>
+      <form method="post" action="/services/{{$id}}/stop"><button class="btn small" type="submit">{{template "icon-stop"}}{{t "service.stop"}}</button></form>
       {{end}}
     {{end}}
-    <a class="btn" href="/services/{{$id}}/logs">{{t "service.logs"}}</a>
+    <a class="btn small" href="/services/{{$id}}/logs">{{t "service.logs"}}</a>
     {{if $.Data.Deployable}}
-    <form method="post" action="/services/{{$id}}/deploy"><button class="btn primary" type="submit">{{t "service.deploy"}}</button></form>
+    <form method="post" action="/services/{{$id}}/deploy"><button class="btn small primary" type="submit">{{template "icon-restart"}}{{t "service.deploy"}}</button></form>
     {{end}}
   </div>
 </div>
+<nav class="tabs sticky" aria-label="{{$s.Name}}">
+  <a href="#status">{{t "service.state"}}</a>
+  {{if $.Data.Deployable}}<a href="#deploys">{{t "service.deploys"}}</a>{{end}}
+  <a href="#domains">{{t "service.addresses"}}</a>
+  {{if .Data.Compose}}<a href="#compose">Compose</a>{{end}}
+  <a href="#web">{{t "web.heading"}}</a>
+  <a href="#settings">{{t "service.settings"}}</a>
+  <a href="/services/{{$id}}/logs">{{t "service.logs"}} →</a>
+</nav>
 
 {{with .Data.Findings}}
 <ul class="findings">{{range .}}{{template "finding" .}}{{end}}</ul>
@@ -36,8 +45,8 @@
 </div>
 {{end}}
 
-<div class="stack narrow">
-<section class="section">
+<div class="stack">
+<section class="section" id="status">
   <h2>{{t "service.state"}}</h2>
   <p class="big-state"><span class="dot {{$c.StateClass}}"></span>{{t $c.StateKey}}{{with $c.Detail}} <span class="muted small">{{.}}</span>{{end}}</p>
   <dl class="facts">

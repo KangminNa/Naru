@@ -88,6 +88,8 @@ type homeScreen struct {
 	OtherRunning int
 	OtherStopped int // 멈춘 것 (한 번 돌고 잘 끝난 것은 빼고)
 	OtherSick    int // 상태 검사가 실패하는 것
+	Healthy      int // 정상인 서비스
+	Troubled     int // 문제가 있는 서비스
 }
 
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +133,14 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, c := range h.Cards {
 		d.Services = append(d.Services, cardOf(c))
+	}
+	for _, c := range d.Services {
+		switch c.StateClass {
+		case "ok":
+			d.Healthy++
+		case "bad", "warn":
+			d.Troubled++
+		}
 	}
 	s.render(w, r, http.StatusOK, "home", view{Nav: "home", User: &u, OK: okKeys[r.URL.Query().Get("ok")], Data: d})
 }

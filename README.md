@@ -162,3 +162,7 @@ scripts/caddy-validate.sh       # 그린 Caddy 설정을 실제 Caddy가 받아�
 ## License
 
 MIT © Kangmin Na
+
+---
+
+관리 화면 글꼴은 [Pretendard](https://github.com/orioncactus/pretendard) 1.3.9(SIL Open Font License 1.1)를 Naru가 직접 내려줍니다 — 라이선스는 `internal/web/static/fonts/Pretendard-LICENSE.txt`.

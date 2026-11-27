@@ -1,5 +1,14 @@
 /* 나루 — 항구의 관제실. 안개 낀 회색 바탕에 남색 글자, 강조색은 바닷빛 하나. 그림자 대신 선으로 나눈다.
    테마: html[data-theme]가 있으면 그것, 없으면 시스템 설정. 어두운 값은 두 곳에 같이 적는다 (CSS만으로는 나눠 쓸 수 없다). */
+/* 글꼴 — Pretendard 1.3.9 (SIL OFL 1.1, fonts/Pretendard-LICENSE.txt). Naru가 직접 내려준다 — 바깥 CDN을 쓰지 않는다. */
+@font-face {
+  font-family: "Pretendard Variable";
+  src: url("/static/fonts/PretendardVariable.woff2") format("woff2-variations"), url("/static/fonts/PretendardVariable.woff2") format("woff2");
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #f3f5f6;
   --card: #ffffff;
@@ -25,7 +34,7 @@
   --harbor-soft: #8fa3b1;
   --tide: #5bb3d0;
   --shadow: none;
-  --sans: Pretendard, "Pretendard Variable", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", Roboto, sans-serif;
+  --sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color-scheme: light;
 }

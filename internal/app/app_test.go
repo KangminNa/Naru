@@ -2515,3 +2515,24 @@ func TestSidebarAndTheme(t *testing.T) {
 		t.Fatal("the English screens say Naru")
 	}
 }
+
+// 글꼴은 Naru가 직접 내려준다 — 바깥 CDN 없이, 라이선스와 함께.
+func TestFontIsServedFromNaru(t *testing.T) {
+	h := newHarness(t, "")
+	res, err := h.client.Get(h.srv.URL + "/static/fonts/PretendardVariable.woff2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	head := make([]byte, 4)
+	io.ReadFull(res.Body, head)
+	if res.StatusCode != http.StatusOK || string(head) != "wOF2" || !strings.Contains(res.Header.Get("Content-Type"), "font/woff2") {
+		t.Fatalf("%d %q %s", res.StatusCode, head, res.Header.Get("Content-Type"))
+	}
+	if code, _, body := h.get("/static/fonts/Pretendard-LICENSE.txt"); code != http.StatusOK || !strings.Contains(body, "SIL Open Font License") {
+		t.Fatalf("%d", code)
+	}
+	if _, _, css := h.get("/static/naru.css"); !strings.Contains(css, `url("/static/fonts/PretendardVariable.woff2")`) || strings.Contains(css, "cdn.jsdelivr") {
+		t.Fatal("the stylesheet points at Naru's own copy")
+	}
+}

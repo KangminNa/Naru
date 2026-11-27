@@ -108,12 +108,16 @@ func (s *Server) containersSelected(w http.ResponseWriter, r *http.Request) {
 	}
 	a, err := model.ParseContainerAction(r.FormValue("action"))
 	names := r.Form["c"]
-	if err != nil || a == model.ActRemove {
+	if err != nil {
 		redirect(w, r, join("err", "action"))
 		return
 	}
 	if len(names) == 0 {
 		redirect(w, r, join("err", "none"))
+		return
+	}
+	if a == model.ActRemove { // 지우기는 바로 하지 않는다 — 확인 화면을 그린다
+		s.renderRemoval(w, r, names, "")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
@@ -290,6 +294,7 @@ var errKeys = map[string]string{
 	"rollback":  "err.rollback",
 	"protected": "err.protected", "running": "err.running", "inuse": "err.inuse", "gone": "err.gone",
 	"action": "err.action", "docker": "err.docker", "confirm": "err.confirmname", "none": "err.noneselected",
+	"network": "err.networkname", "alias": "err.alias",
 }
 
 // auditTarget은 컨테이너·묶음·이미지·볼륨 동작의 대상이다 — 경로에서 꺼낸다.
@@ -299,6 +304,10 @@ func auditTarget(path string) string {
 	case len(parts) == 4 && parts[0] == "containers" && parts[1] == "projects":
 		return parts[2]
 	case len(parts) == 3 && parts[0] == "containers":
+		return unescape(parts[1])
+	case len(parts) == 5 && parts[0] == "containers" && parts[2] == "networks":
+		return unescape(parts[1]) + " → " + unescape(parts[3])
+	case len(parts) == 3 && parts[0] == "networks":
 		return unescape(parts[1])
 	case len(parts) == 4 && parts[0] == "storage" && parts[1] == "images":
 		return model.ShortImageID(model.ImageID(unescape(parts[2])))
@@ -313,4 +322,186 @@ func unescape(s string) string {
 		return u
 	}
 	return s
+}
+
+// ── 여러 컨테이너 지우기 — 확인 화면 ────────────
+
+type removalScreen struct {
+	Rows    []model.RemovalRow
+	Count   int // 지울 것 (건너뛰는 것 빼고, 돌고 있는 것은 넣고)
+	Running int
+	Word    string // 입력해야 할 확인 글자
+}
+
+func (s *Server) renderRemoval(w http.ResponseWriter, r *http.Request, names []string, errKey string) {
+	u, _, _ := s.currentUser(r)
+	rows, err := s.d.Removal.Plan(r.Context(), names)
+	if err != nil {
+		redirect(w, r, "/containers?err=docker")
+		return
+	}
+	d := removalScreen{Rows: rows, Word: removeWord(langOf(r))}
+	for _, row := range rows {
+		switch row.Skip {
+		case "":
+			d.Count++
+		case "running":
+			d.Count++
+			d.Running++
+		}
+	}
+	status := http.StatusOK
+	if errKey != "" {
+		status = http.StatusBadRequest
+	}
+	s.render(w, r, status, "containers_remove", view{Nav: "containers", User: &u, Err: errKey, Data: d})
+}
+
+// removeWord는 확인 칸에 적어야 하는 글자다.
+func removeWord(lang string) string {
+	if lang == "ko" {
+		return "지우기"
+	}
+	return "delete"
+}
+
+// containersRemove는 확인 화면에서 지운다 — 확인 글자가 맞아야 한다.
+func (s *Server) containersRemove(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.gate(w, r); !ok {
+		return
+	}
+	r.ParseForm()
+	names := r.PostForm["c"]
+	if len(names) == 0 {
+		redirect(w, r, "/containers?err=none")
+		return
+	}
+	word := strings.TrimSpace(r.FormValue("confirm"))
+	if word != removeWord("ko") && word != removeWord("en") {
+		s.renderRemoval(w, r, names, "err.confirmword")
+		return
+	}
+	opts := model.RemoveOptions{StopRunning: r.FormValue("stop") == "1", AnonVolumes: r.FormValue("volumes") == "1"}
+	ctx, cancel := context.WithTimeout(r.Context(), 180*time.Second)
+	defer cancel()
+	res, err := s.d.Removal.Remove(ctx, names, opts)
+	switch {
+	case err != nil:
+		s.d.Log.Warn("remove containers", "err", err)
+		redirect(w, r, "/containers?err=docker")
+	case len(res.Failed) > 0:
+		s.d.Log.Warn("remove containers", "failed", res.Failed)
+		redirect(w, r, "/containers?err=docker")
+	case len(res.Skipped) > 0:
+		redirect(w, r, "/containers?ok=removed-some")
+	default:
+		redirect(w, r, "/containers?ok=removed-many")
+	}
+}
+
+// ── 네트워크 ──────────────────────────────
+
+type networksScreen struct {
+	Rows        []model.NetworkRow
+	Unreachable bool
+	Name        string // 만들기 칸에 다시 채울 값
+	Internal    bool
+}
+
+func (s *Server) networksPage(w http.ResponseWriter, r *http.Request) {
+	u, _, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	s.renderNetworks(w, r, u, http.StatusOK, "", networksScreen{})
+}
+
+func (s *Server) renderNetworks(w http.ResponseWriter, r *http.Request, u model.Account, status int, errKey string, d networksScreen) {
+	rows, err := s.d.Networks.List(r.Context())
+	if err != nil {
+		s.d.Log.Warn("networks", "err", err)
+		d.Unreachable = true
+	}
+	d.Rows = rows
+	if errKey == "" {
+		errKey = errKeys[r.URL.Query().Get("err")]
+	}
+	s.render(w, r, status, "networks", view{Nav: "containers", User: &u, OK: okKeys[r.URL.Query().Get("ok")], Err: errKey, Data: d})
+}
+
+func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
+	u, _, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	d := networksScreen{Name: r.FormValue("name"), Internal: r.FormValue("internal") == "1"}
+	name, err := model.ParseNetworkName(d.Name)
+	if err != nil {
+		s.renderNetworks(w, r, u, http.StatusBadRequest, "err.networkname", d)
+		return
+	}
+	if err := s.d.Networks.Create(r.Context(), name, d.Internal); err != nil {
+		s.d.Log.Warn("create network", "network", name.String(), "err", err)
+		key := "err.docker"
+		if errors.Is(err, model.ErrInUse) {
+			key = "err.networkexists"
+		}
+		s.renderNetworks(w, r, u, http.StatusBadRequest, key, d)
+		return
+	}
+	redirect(w, r, "/networks?ok=network-created")
+}
+
+func (s *Server) removeNetwork(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.gate(w, r); !ok {
+		return
+	}
+	name := r.PathValue("name")
+	if strings.TrimSpace(r.FormValue("confirm")) != name {
+		redirect(w, r, "/networks?err=confirm")
+		return
+	}
+	if err := s.d.Networks.Remove(r.Context(), name); err != nil {
+		s.d.Log.Warn("remove network", "network", name, "err", err)
+		redirect(w, r, "/networks?err="+errCode(err))
+		return
+	}
+	redirect(w, r, "/networks?ok=network-removed")
+}
+
+func (s *Server) containerAttach(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.gate(w, r); !ok {
+		return
+	}
+	name := r.PathValue("name")
+	back := "/containers/" + url.PathEscape(name)
+	network, err := model.ParseNetworkName(r.FormValue("network"))
+	if err != nil {
+		redirect(w, r, back+"?err=network#networks")
+		return
+	}
+	if err := s.d.Networks.Attach(r.Context(), name, network, r.FormValue("alias")); err != nil {
+		s.d.Log.Warn("attach network", "container", name, "network", network.String(), "err", err)
+		code := errCode(err)
+		if ie, ok := model.AsInputError(err); ok && ie.Code == "alias" {
+			code = "alias"
+		}
+		redirect(w, r, back+"?err="+code+"#networks")
+		return
+	}
+	redirect(w, r, back+"?ok=attached#networks")
+}
+
+func (s *Server) containerDetach(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.gate(w, r); !ok {
+		return
+	}
+	name := r.PathValue("name")
+	back := "/containers/" + url.PathEscape(name)
+	if err := s.d.Networks.Detach(r.Context(), name, r.PathValue("network")); err != nil {
+		s.d.Log.Warn("detach network", "container", name, "network", r.PathValue("network"), "err", err)
+		redirect(w, r, back+"?err="+errCode(err)+"#networks")
+		return
+	}
+	redirect(w, r, back+"?ok=detached#networks")
 }

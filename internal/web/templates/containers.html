@@ -3,8 +3,8 @@
 {{define "content"}}{{$d := .Data}}
 <div class="page-head">
   <div><h1>{{t "containers.title"}}</h1><p>{{t "containers.sub"}}</p></div>
-  <a class="btn" href="/storage">{{template "icon-stack"}}{{t "containers.storage"}}</a>
 </div>
+{{template "dockertabs" "containers"}}
 {{template "error" .}}
 {{if $d.Unreachable}}<p class="flash bad">{{t "containers.unreachable"}}</p>{{else}}
 <div class="tiles">
@@ -30,6 +30,7 @@
       <button class="btn small" type="submit" name="action" value="restart">{{template "icon-restart"}}{{t "containers.restart"}}</button>
       <button class="btn small" type="submit" name="action" value="stop">{{template "icon-stop"}}{{t "containers.stop"}}</button>
       <button class="btn small" type="submit" name="action" value="start">{{template "icon-play"}}{{t "containers.start"}}</button>
+      <button class="btn small danger" type="submit" name="action" value="remove">{{template "icon-trash"}}{{t "containers.remove.button"}}</button>
     </div>
   </div>
   <div class="table-scroll">
@@ -51,7 +52,7 @@
       </td></tr>
       {{range .Rows}}
       <tr class="{{if not .Running}}off{{end}}">
-        <td class="c-check">{{if .Locked}}<span class="lock" title="{{t "containers.locked.short"}}">{{template "icon-lock"}}</span>{{else if not .Ended}}<input type="checkbox" name="c" value="{{.Name}}" aria-label="{{.Name}}">{{end}}</td>
+        <td class="c-check">{{if .Locked}}<span class="lock" title="{{t "containers.locked.short"}}">{{template "icon-lock"}}</span>{{else}}<input type="checkbox" name="c" value="{{.Name}}" aria-label="{{.Name}}">{{end}}</td>
         <td class="name"><a href="/containers/{{.Name}}">{{.Name}}</a><span class="img">{{.ImageLabel}}</span></td>
         <td>{{template "cstate" .}}</td>
         <td class="num">{{with .Usage}}{{cpu .CPUPercent}} <span class="muted">· {{bytes .MemUsed}}</span>{{else}}<span class="muted">—</span>{{end}}</td>

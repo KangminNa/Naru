@@ -55,16 +55,17 @@ func (fakeImages) Remove(context.Context, string) error       { return nil }
 
 // fakeDocker는 컨테이너를 기억한다. hold를 닫기 전까지 새 컨테이너는 응답하지 않는다(배포가 멈춰 있다).
 type fakeDocker struct {
-	mu      sync.Mutex
-	states  model.ContainerStates
-	down    bool
-	hold    chan struct{}
-	listens map[string]model.Port // 컨테이너마다 앱이 실제로 듣는 포트 (없으면 어느 포트든 응답)
-	nets    map[string][]model.DockerNetwork
-	acts    []string // 컨테이너 화면의 동작 ("restart cairn-web-1")
-	joins   []string
-	specs   map[string]model.ContainerSpec // Naru가 띄운 것
-	details map[string]model.ContainerDetails
+	mu       sync.Mutex
+	states   model.ContainerStates
+	down     bool
+	hold     chan struct{}
+	listens  map[string]model.Port // 컨테이너마다 앱이 실제로 듣는 포트 (없으면 어느 포트든 응답)
+	nets     map[string][]model.DockerNetwork
+	acts     []string // 컨테이너 화면의 동작 ("restart cairn-web-1")
+	madeNets []string // 네트워크 화면에서 만든 것
+	joins    []string
+	specs    map[string]model.ContainerSpec // Naru가 띄운 것
+	details  map[string]model.ContainerDetails
 }
 
 // Inspect는 details에 적힌 컨테이너만 안다 (ContainerInspector).
@@ -151,7 +152,7 @@ func (d *fakeDocker) act(what, name, state, status string) error {
 }
 
 // RemoveStopped는 멈춘 것만 지운다 (ContainerSweeper).
-func (d *fakeDocker) RemoveStopped(_ context.Context, name string) error {
+func (d *fakeDocker) RemoveStopped(_ context.Context, name string, anon bool) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	st, ok := d.states[name]
@@ -162,8 +163,61 @@ func (d *fakeDocker) RemoveStopped(_ context.Context, name string) error {
 		return model.ErrRunning
 	}
 	delete(d.states, name)
+	if anon {
+		name += " +volumes"
+	}
 	d.acts = append(d.acts, "remove "+name)
 	return nil
+}
+
+// JoinAs는 별칭과 함께 기억한다.
+func (d *fakeDocker) JoinAs(_ context.Context, network, name string, aliases []string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d.states[name]; !ok {
+		return model.ErrNotFound
+	}
+	d.joins = append(d.joins, network+"<-"+name+"@"+strings.Join(aliases, ","))
+	return nil
+}
+
+// Networks는 앱 네트워크, compose 묶음 하나, 안 쓰는 것 하나, 기본 bridge다 (NetworkStore).
+func (d *fakeDocker) Networks(context.Context) ([]model.NetworkRow, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rows := []model.NetworkRow{{Name: "bridge", Driver: "bridge"}, {Name: "naru-net", Driver: "bridge", Containers: []string{"naru-caddy"}},
+		{Name: "cairn_default", Driver: "bridge", Project: "cairn", Containers: []string{"cairn-web-1"}}}
+	for _, n := range d.madeNets {
+		rows = append(rows, model.NetworkRow{Name: n, Driver: "bridge"})
+	}
+	return rows, nil
+}
+
+func (d *fakeDocker) CreateNetwork(_ context.Context, name model.NetworkName, internal bool) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, n := range d.madeNets {
+		if n == name.String() {
+			return model.ErrInUse
+		}
+	}
+	d.madeNets = append(d.madeNets, name.String())
+	return nil
+}
+
+func (d *fakeDocker) RemoveNetwork(_ context.Context, name string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if name == "cairn_default" {
+		return model.ErrInUse
+	}
+	for i, n := range d.madeNets {
+		if n == name {
+			d.madeNets = append(d.madeNets[:i], d.madeNets[i+1:]...)
+			return nil
+		}
+	}
+	return model.ErrNotFound
 }
 
 // DiskUsage는 이미지 둘(하나는 안 씀)과 볼륨 둘(하나는 씀)이다.
@@ -379,7 +433,7 @@ func newHarnessWith(t *testing.T, o harnessOpts) *harness {
 		compose = &fakeCompose{docker: h.docker}
 	}
 	a, err := OpenWith(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), Outside{
-		Compose: compose, Sweeper: h.docker, Disk: h.docker, Volumes: h.docker,
+		Compose: compose, Sweeper: h.docker, Disk: h.docker, Volumes: h.docker, NetStore: h.docker,
 		Builder: fakeRegistry{}, Puller: fakeRegistry{}, Images: fakeImages{},
 		Starter: h.docker, Remover: h.docker, Switch: h.docker, Watcher: h.docker, Ports: h.docker, AppLogs: h.docker, Usage: h.docker, Networks: h.docker, Inspect: h.docker,
 		Code: fakeGit{}, DNS: netcheck.NewDNS(lookup), Stats: fakeStats{}, Sender: h.caddy, Certs: h.certs, Snippet: fakeSnippet{},
@@ -1583,8 +1637,8 @@ func TestContainerActionsAndTheirGuards(t *testing.T) {
 	if _, loc, _ := h.post("/containers", url.Values{"action": {"stop"}, "c": {"cairn-web-1"}}); loc != "/containers?ok=selected-stop" {
 		t.Fatalf("%s", loc)
 	}
-	if _, loc, _ := h.post("/containers", url.Values{"action": {"remove"}, "c": {"cairn-worker-1"}}); !strings.Contains(loc, "err=action") {
-		t.Fatalf("removing is one at a time, on the detail page: %s", loc)
+	if code, _, page := h.post("/containers", url.Values{"action": {"remove"}, "c": {"cairn-worker-1"}}); code != http.StatusOK || !strings.Contains(page, "컨테이너 1개를 지울까요?") {
+		t.Fatalf("removing goes through a confirm page: %d", code)
 	}
 	if _, loc, _ := h.post("/containers", url.Values{"action": {"start"}, "back": {"//evil.example"}}); loc != "/containers?err=none" {
 		t.Fatalf("nothing selected, and back stays on this page: %s", loc)
@@ -2329,5 +2383,100 @@ func TestComposeNeedsTheHostDataPath(t *testing.T) {
 	code, _, body := h.post("/services/new", url.Values{"kind": {"compose"}, "source": {"https://github.com/me/shop"}})
 	if code != http.StatusBadRequest || !strings.Contains(body, "NARU_HOST_DATA") {
 		t.Fatalf("%d", code)
+	}
+}
+
+// 여러 개 지우기는 확인 화면을 거친다 — 글자가 맞아야, 돌고 있는 것은 고를 때만, 보호된 것은 건너뛴다.
+func TestRemovingSeveralGoesThroughAConfirmPage(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	h.docker.set("old-api", model.ContainerState{Name: "old-api", State: "exited", Status: "Exited (1) 5 days ago"})
+	h.docker.set("test-redis", model.ContainerState{Name: "test-redis", Running: true, State: "running", Status: "Up 1 hour"})
+	h.docker.set("naru-caddy", model.ContainerState{Name: "naru-caddy", Running: true, State: "running", Status: "Up 1 day"})
+	pick := url.Values{"action": {"remove"}, "c": {"old-api", "test-redis", "naru-caddy"}}
+
+	code, _, page := h.post("/containers", pick)
+	for _, want := range []string{"컨테이너 2개를 지울까요?", "웹서버라 건너뛰어요", "돌고 있어요", "돌고 있는 1개는 멈추고 지우기", "이름 없는 볼륨도 같이 지우기",
+		`name="c" value="old-api"`, `name="c" value="test-redis"`, "확인을 위해 지우기를 입력하세요"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("confirm page is missing %q", want)
+		}
+	}
+	if code != http.StatusOK || strings.Contains(page, `name="c" value="naru-caddy"`) {
+		t.Fatalf("%d — the web server is not carried on", code)
+	}
+	if code, _, page := h.post("/containers/remove", url.Values{"c": {"old-api"}, "confirm": {"지우"}}); code != http.StatusBadRequest || !strings.Contains(page, "확인 글자가 맞지 않아요") {
+		t.Fatalf("%d", code)
+	}
+	if _, loc, _ := h.post("/containers/remove", url.Values{"c": {"old-api", "test-redis", "naru-caddy"}, "confirm": {"지우기"}}); loc != "/containers?ok=removed-some" {
+		t.Fatalf("the running one waits, the web server is skipped: %s", loc)
+	}
+	if _, loc, _ := h.post("/containers/remove", url.Values{"c": {"test-redis"}, "confirm": {"delete"}, "stop": {"1"}, "volumes": {"1"}}); loc != "/containers?ok=removed-many" {
+		t.Fatalf("%s", loc)
+	}
+	h.docker.mu.Lock()
+	acts := strings.Join(h.docker.acts, ",")
+	h.docker.mu.Unlock()
+	if acts != "remove old-api,stop test-redis,remove test-redis +volumes" {
+		t.Fatalf("%s", acts)
+	}
+	if _, _, settings := h.get("/settings"); !strings.Contains(settings, "old-api, test-redis, naru-caddy 컨테이너를 지웠어요") {
+		t.Fatal("the activity log names what was picked")
+	}
+}
+
+func TestNetworksPageAndAttaching(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	h.docker.set("cairn-web-1", model.ContainerState{Name: "cairn-web-1", Running: true, State: "running", Project: "cairn"})
+	h.docker.set("naru-caddy", model.ContainerState{Name: "naru-caddy", Running: true, State: "running"})
+
+	_, _, page := h.get("/networks")
+	for _, want := range []string{"Docker 기본", "Naru 앱 네트워크", "cairn_default", "cairn 묶음", `href="/containers/cairn-web-1"`, `aria-current="page">`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("networks page is missing %q", want)
+		}
+	}
+	if code, _, page := h.post("/networks", url.Values{"name": {"host"}}); code != http.StatusBadRequest || !strings.Contains(page, "bridge·host·none은 쓸 수 없어요") {
+		t.Fatalf("%d", code)
+	}
+	if _, loc, _ := h.post("/networks", url.Values{"name": {"db-only"}, "internal": {"1"}}); loc != "/networks?ok=network-created" {
+		t.Fatalf("%s", loc)
+	}
+	if code, _, page := h.post("/networks", url.Values{"name": {"db-only"}}); code != http.StatusBadRequest || !strings.Contains(page, "이미 있어요") {
+		t.Fatalf("%d", code)
+	}
+	if _, loc, _ := h.post("/networks/naru-net/delete", url.Values{"confirm": {"naru-net"}}); !strings.Contains(loc, "err=protected") {
+		t.Fatalf("the app network stays: %s", loc)
+	}
+	if _, loc, _ := h.post("/networks/cairn_default/delete", url.Values{"confirm": {"cairn_default"}}); !strings.Contains(loc, "err=inuse") {
+		t.Fatalf("%s", loc)
+	}
+
+	// 상세에서 붙이기·떼기
+	_, _, detail := h.get("/containers/cairn-web-1")
+	if !strings.Contains(detail, `<option value="db-only">`) || !strings.Contains(detail, `action="/containers/cairn-web-1/networks"`) {
+		t.Fatal("the detail offers networks to attach")
+	}
+	if _, loc, _ := h.post("/containers/cairn-web-1/networks", url.Values{"network": {"db-only"}, "alias": {"api"}}); !strings.Contains(loc, "ok=attached") {
+		t.Fatalf("%s", loc)
+	}
+	if _, loc, _ := h.post("/containers/cairn-web-1/networks", url.Values{"network": {"db-only"}, "alias": {"bad alias"}}); !strings.Contains(loc, "err=alias") {
+		t.Fatalf("%s", loc)
+	}
+	if _, loc, _ := h.post("/containers/naru-caddy/networks", url.Values{"network": {"db-only"}}); !strings.Contains(loc, "err=protected") {
+		t.Fatalf("%s", loc)
+	}
+	if !strings.Contains(strings.Join(h.docker.joined(), ","), "db-only<-cairn-web-1@api") {
+		t.Fatal("joined with the alias")
+	}
+	if _, loc, _ := h.post("/networks/db-only/delete", url.Values{"confirm": {"db-only"}}); loc != "/networks?ok=network-removed" {
+		t.Fatalf("%s", loc)
+	}
+	_, _, settings := h.get("/settings")
+	for _, want := range []string{"db-only 네트워크를 만들었어요", "cairn-web-1 → db-only 네트워크에 붙였어요", "db-only 네트워크를 지웠어요"} {
+		if !strings.Contains(settings, want) {
+			t.Errorf("activity log is missing %q", want)
+		}
 	}
 }

@@ -25,7 +25,10 @@ func (s *switchLog) Restart(_ context.Context, n string) error {
 	s.did = append(s.did, "restart "+n)
 	return nil
 }
-func (s *switchLog) RemoveStopped(_ context.Context, n string) error {
+func (s *switchLog) RemoveStopped(_ context.Context, n string, anon bool) error {
+	if anon {
+		n += " +volumes"
+	}
 	s.did = append(s.did, "remove "+n)
 	return nil
 }
@@ -157,5 +160,121 @@ func TestContainerBoardGuardsWhatNaruOwns(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(v.EnvNames, " ")+v.HealthLog, "hunter2") {
 		t.Fatal("no values")
+	}
+}
+
+type netLog struct {
+	rows []model.NetworkRow
+	did  []string
+}
+
+func (n *netLog) Networks(context.Context) ([]model.NetworkRow, error) { return n.rows, nil }
+func (n *netLog) CreateNetwork(_ context.Context, name model.NetworkName, internal bool) error {
+	n.did = append(n.did, "create "+name.String())
+	return nil
+}
+func (n *netLog) RemoveNetwork(_ context.Context, name string) error {
+	n.did = append(n.did, "remove "+name)
+	return nil
+}
+func (n *netLog) NetworksOf(context.Context, string) ([]model.DockerNetwork, error) { return nil, nil }
+func (n *netLog) Join(context.Context, string, string) error                        { return nil }
+func (n *netLog) JoinAs(_ context.Context, net, c string, aliases []string) error {
+	n.did = append(n.did, "join "+net+" "+c+" "+strings.Join(aliases, ","))
+	return nil
+}
+func (n *netLog) Leave(_ context.Context, net, c string) error {
+	n.did = append(n.did, "leave "+net+" "+c)
+	return nil
+}
+
+// 여러 개 지우기와 네트워크 — 보호 규칙은 컨테이너 화면과 같다.
+func TestRemovalAndNetworksKeepTheSameGuards(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "naru.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	services := store.NewServices(db)
+	n, _ := model.ParseServiceName("blog")
+	blog, _ := services.Create(ctx, model.NewService{Name: n, Kind: model.KindImage, Source: "me/blog", Alias: "naru-blog"})
+	store.NewLiveStates(db).Save(ctx, blog, model.LiveState{Alias: "naru-blog", Instance: "naru-blog-3"})
+	all := model.ContainerStates{
+		"naru-caddy":  {Name: "naru-caddy", State: "running", Running: true},
+		"naru-blog-3": {Name: "naru-blog-3", State: "running", Running: true},
+		"web":         {Name: "web", State: "running", Running: true},
+		"old":         {Name: "old", State: "exited", Status: "Exited (1) now"},
+	}
+	sw := &switchLog{}
+	nl := &netLog{rows: []model.NetworkRow{{Name: "bridge"}, {Name: "naru-net"}, {Name: "spare"}}}
+	parts := BoardParts{Services: services, Containers: someContainers{all: all}, Inspector: someDetails{
+		"web": {Networks: []model.NetworkAttachment{{Name: "bridge"}, {Name: "naru-net", IP: "172.18.0.5"}}}}, Logs: fixedLogs{},
+		Switch: sw, Sweeper: sw, Networks: nl, Self: "naru", WebServer: "naru-caddy", AppNetwork: "naru-net"}
+
+	rb := NewRemovalBoard(parts)
+	plan, err := rb.Plan(ctx, []string{"web", "old", "naru-caddy", "naru-blog-3", "nope"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	skips := map[string]string{}
+	for _, p := range plan {
+		skips[p.Row.Name] = p.Skip
+	}
+	if len(plan) != 4 || skips["web"] != "running" || skips["old"] != "" || skips["naru-caddy"] != model.LockedWebServer || skips["naru-blog-3"] != model.LockedService {
+		t.Fatalf("%v", skips)
+	}
+	res, _ := rb.Remove(ctx, []string{"web", "old", "naru-caddy"}, model.RemoveOptions{})
+	if strings.Join(res.Removed, ",") != "old" || strings.Join(res.Skipped, ",") != "naru-caddy,web" || strings.Join(sw.did, ",") != "remove old" {
+		t.Fatalf("a running one waits for the stop box: %+v %v", res, sw.did)
+	}
+	sw.did = nil
+	res, _ = rb.Remove(ctx, []string{"web"}, model.RemoveOptions{StopRunning: true, AnonVolumes: true})
+	if strings.Join(res.Removed, ",") != "web" || strings.Join(sw.did, ",") != "stop web,remove web +volumes" {
+		t.Fatalf("stopped first, then removed with its unnamed volumes: %v", sw.did)
+	}
+
+	nb := NewNetworkBoard(NetworkParts{Board: parts, Store: nl, Joiner: nl})
+	rows, _ := nb.List(ctx)
+	locks := map[string]string{}
+	for _, r := range rows {
+		locks[r.Name] = r.Locked
+	}
+	if locks["bridge"] != model.LockedDefault || locks["naru-net"] != model.LockedApp || locks["spare"] != "" {
+		t.Fatalf("%v", locks)
+	}
+	for _, name := range []string{"bridge", "naru-net"} {
+		if err := nb.Remove(ctx, name); !errors.Is(err, model.ErrProtected) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	spare, _ := model.ParseNetworkName("spare")
+	if err := nb.Attach(ctx, "naru-caddy", spare, ""); !errors.Is(err, model.ErrProtected) {
+		t.Fatalf("the web server's networks are Naru's: %v", err)
+	}
+	if err := nb.Detach(ctx, "naru-blog-3", "naru-net"); !errors.Is(err, model.ErrProtected) {
+		t.Fatalf("a service's networks are in its settings: %v", err)
+	}
+	if err := nb.Detach(ctx, "web", "bridge"); !errors.Is(err, model.ErrProtected) {
+		t.Fatalf("the default bridge is Docker's: %v", err)
+	}
+	if err := nb.Attach(ctx, "web", spare, "bad alias!"); err == nil {
+		t.Fatal("alias is checked")
+	}
+	nl.did = nil
+	nb.Attach(ctx, "web", spare, "api")
+	nb.Detach(ctx, "web", "naru-net")
+	nb.Remove(ctx, "spare")
+	if strings.Join(nl.did, "|") != "join spare web api|leave naru-net web|remove spare" {
+		t.Fatalf("%v", nl.did)
+	}
+
+	// 상세: 붙은 네트워크와 잠김, 더 붙일 수 있는 것
+	v, err := NewContainerBoard(parts).Detail(ctx, "web", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Networks) != 2 || v.Networks[0].Locked != model.LockedDefault || v.Networks[1].Locked != "" || strings.Join(v.Joinable, ",") != "spare" {
+		t.Fatalf("%+v %v", v.Networks, v.Joinable)
 	}
 }

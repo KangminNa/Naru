@@ -137,8 +137,8 @@ func (k Containers) Restart(ctx context.Context, name string) error {
 }
 
 // RemoveStopped는 멈춘 컨테이너를 지운다 (ContainerSweeper). 강제하지 않는다 — 돌고 있으면 model.ErrRunning.
-func (k Containers) RemoveStopped(ctx context.Context, name string) error {
-	err := k.c.removeStopped(ctx, name)
+func (k Containers) RemoveStopped(ctx context.Context, name string, anonVolumes bool) error {
+	err := k.c.removeStopped(ctx, name, anonVolumes)
 	switch {
 	case errors.Is(err, ErrConflict):
 		return fmt.Errorf("%w: %v", model.ErrRunning, err)
@@ -240,12 +240,21 @@ func (k Containers) Inspect(ctx context.Context, name string) (model.ContainerDe
 		return model.ContainerDetails{}, err
 	}
 	return model.ContainerDetails{Env: d.Env, ImageEnv: d.ImageEnv, Binds: d.Binds, NamedVolumes: d.NamedVolumes, Source: d.Source,
-		Health: d.Health, HealthLog: d.HealthLog, Started: d.Started, Restarts: d.Restarts}, nil
+		Health: d.Health, HealthLog: d.HealthLog, Started: d.Started, Restarts: d.Restarts, Networks: d.Networks}, nil
 }
 
 // Join은 컨테이너를 네트워크에 붙인다. 이미 붙어 있으면 그대로 괜찮다.
 func (k Containers) Join(ctx context.Context, network, name string) error {
 	return k.c.connect(ctx, network, name, nil)
+}
+
+// JoinAs는 별칭을 주어 붙인다 — 그 네트워크에서 이 이름들로도 찾아진다.
+func (k Containers) JoinAs(ctx context.Context, network, name string, aliases []string) error {
+	err := k.c.connect(ctx, network, name, aliases)
+	if errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("%w: %v", model.ErrNotFound, err)
+	}
+	return err
 }
 
 // Leave는 컨테이너를 네트워크에서 뗀다. 이미 떨어져 있으면 그대로 괜찮다.

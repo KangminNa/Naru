@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -284,9 +285,13 @@ func (c *Client) restart(ctx context.Context, name string, grace time.Duration) 
 	return c.callLong(ctx, http.MethodPost, fmt.Sprintf("/containers/%s/restart?t=%d", url.PathEscape(name), int(grace.Seconds())), nil)
 }
 
-// removeStopped는 강제하지 않고 지운다 — 돌고 있으면 Docker가 409로 거절한다.
-func (c *Client) removeStopped(ctx context.Context, name string) error {
-	return c.call(ctx, http.MethodDelete, "/containers/"+url.PathEscape(name), nil, nil)
+// removeStopped는 강제하지 않고 지운다 — 돌고 있으면 Docker가 409로 거절한다. anon이면 이름 없는 볼륨도 (?v=1 — 이름 있는 볼륨은 남는다).
+func (c *Client) removeStopped(ctx context.Context, name string, anon bool) error {
+	path := "/containers/" + url.PathEscape(name)
+	if anon {
+		path += "?v=1"
+	}
+	return c.call(ctx, http.MethodDelete, path, nil, nil)
 }
 
 func (c *Client) remove(ctx context.Context, name string) error {
@@ -326,6 +331,7 @@ type Details struct {
 	Health, HealthLog   string
 	Started             time.Time
 	Restarts            int
+	Networks            []model.NetworkAttachment
 }
 
 func (c *Client) details(ctx context.Context, name string) (Details, error) {
@@ -346,6 +352,13 @@ func (c *Client) details(ctx context.Context, name string) (Details, error) {
 		Mounts []struct {
 			Type, Name, Source, Destination string
 			RW                              bool
+		}
+		Name            string
+		NetworkSettings struct {
+			Networks map[string]struct {
+				IPAddress string
+				Aliases   []string
+			}
 		}
 	}
 	if err := c.call(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/json", nil, &raw); err != nil {
@@ -375,6 +388,17 @@ func (c *Client) details(ctx context.Context, name string) (Details, error) {
 	}
 	sort.Strings(d.Binds)
 	sort.Strings(d.NamedVolumes)
+	self := strings.TrimPrefix(raw.Name, "/")
+	for n, e := range raw.NetworkSettings.Networks {
+		a := model.NetworkAttachment{Name: n, IP: e.IPAddress}
+		for _, al := range e.Aliases {
+			if al != self && !isShortID(al) && !slices.Contains(a.Aliases, al) {
+				a.Aliases = append(a.Aliases, al)
+			}
+		}
+		d.Networks = append(d.Networks, a)
+	}
+	sort.Slice(d.Networks, func(i, j int) bool { return d.Networks[i].Name < d.Networks[j].Name })
 	var img struct {
 		Config struct{ Env []string }
 	}

@@ -475,8 +475,32 @@ type ContainerSwitch interface {
 }
 
 // ContainerSweeper는 멈춘 컨테이너 하나를 지운다. 강제하지 않는다 — 돌고 있으면 model.ErrRunning.
+// anonVolumes면 이름 없는 볼륨도 함께 (이름 있는 볼륨은 Docker도 지우지 않는다).
 type ContainerSweeper interface {
-	RemoveStopped(ctx context.Context, name string) error
+	RemoveStopped(ctx context.Context, name string, anonVolumes bool) error
+}
+
+// NetworkStore는 이 서버의 네트워크를 읽고, 만들고, 지운다. 지우기는 강제하지 않는다 — 붙은 것이 있으면 model.ErrInUse.
+type NetworkStore interface {
+	Networks(ctx context.Context) ([]model.NetworkRow, error) // Locked는 비어 있다 — 보호는 화면 쪽이 정한다
+	CreateNetwork(ctx context.Context, name model.NetworkName, internal bool) error
+	RemoveNetwork(ctx context.Context, name string) error
+}
+
+// RemovalBoard는 여러 컨테이너 지우기다 — 확인 화면(Plan)을 먼저 그리고 지운다. 보호된 것은 건너뛴다.
+type RemovalBoard interface {
+	Plan(ctx context.Context, names []string) ([]model.RemovalRow, error)
+	Remove(ctx context.Context, names []string, o model.RemoveOptions) (model.RemovalResult, error)
+}
+
+// NetworkBoard는 네트워크 화면과 컨테이너 상세의 붙이기·떼기다. 보호 규칙을 여기서 지킨다 (model.ErrProtected):
+// 기본 네트워크는 다루지 않고, 앱 네트워크는 지우지 않으며, Naru 자신·웹서버·Naru 서비스의 네트워크는 건드리지 않는다.
+type NetworkBoard interface {
+	List(ctx context.Context) ([]model.NetworkRow, error)
+	Create(ctx context.Context, name model.NetworkName, internal bool) error
+	Remove(ctx context.Context, name string) error
+	Attach(ctx context.Context, container string, network model.NetworkName, alias string) error
+	Detach(ctx context.Context, container, network string) error
 }
 
 // DiskUsageReader는 이미지·볼륨과 크기·쓰는 컨테이너 수를 읽는다 (docker system df — 몇 초 걸린다).
@@ -590,6 +614,7 @@ type ContainerInspector interface {
 type NetworkJoiner interface {
 	NetworksOf(ctx context.Context, container string) ([]model.DockerNetwork, error) // 없는 컨테이너면 model.ErrNotFound
 	Join(ctx context.Context, network, container string) error                       // 이미 붙어 있으면 그대로
+	JoinAs(ctx context.Context, network, container string, aliases []string) error   // 별칭을 주어 붙인다 (이미 붙어 있으면 그대로)
 	Leave(ctx context.Context, network, container string) error
 }
 

@@ -127,6 +127,7 @@ type ContainerDetails struct {
 	HealthLog    string   // 상태 검사의 마지막 출력
 	Started      time.Time
 	Restarts     int
+	Networks     []NetworkAttachment // 붙은 네트워크 — IP·별칭 (Locked는 비어 있다)
 }
 
 // HomeView는 홈 화면이다.

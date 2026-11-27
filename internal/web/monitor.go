@@ -159,28 +159,33 @@ func auditRowOf(e model.AuditEntry) auditRow {
 // auditActions는 기록할 관리자의 요청이다 — 경로 모양 → 문구 키. 성공(다른 곳으로 보냄, 3xx)했을 때만 남긴다.
 // 로그인은 실패도 남겨야 해서 따로 (login). 웹훅은 사람이 아니라 기록하지 않는다 (배포는 Naru가 본 일로 남는다).
 var auditActions = map[string]string{
-	"POST /logout":                                 "logout",
-	"POST /services/new":                           "service.create",
-	"POST /services/{id}/deploy":                   "service.deploy",
-	"POST /services/{id}/rollback/{did}":           "service.rollback",
-	"POST /services/{id}/stop":                     "service.stop",
-	"POST /services/{id}/start":                    "service.start",
-	"POST /services/{id}/settings":                 "service.settings",
-	"POST /services/{id}/domains":                  "service.domain.add",
-	"POST /services/{id}/domains/{did}/delete":     "service.domain.remove",
-	"POST /services/{id}/domains/{did}/target":     "service.domain.target",
-	"POST /services/{id}/port":                     "service.port",
-	"POST /services/{id}/web":                      "service.web",
-	"POST /services/{id}/delete":                   "service.delete",
-	"POST /settings/password":                      "settings.password",
-	"POST /settings/domain":                        "settings.domain",
-	"POST /settings/alerts":                        "settings.alert.add",
-	"POST /settings/alerts/{cid}/delete":           "settings.alert.remove",
-	"POST /containers/{name}/{action}":             "container.*", // * = 경로의 동작 (restart·stop·start·remove)
-	"POST /containers/projects/{project}/{action}": "project.*",
-	"POST /containers":                             "container.selected.*", // * = 폼의 동작, 대상 = 고른 이름들
-	"POST /storage/images/{id}/delete":             "image.remove",
-	"POST /storage/volumes/{name}/delete":          "volume.remove",
+	"POST /logout":                                      "logout",
+	"POST /services/new":                                "service.create",
+	"POST /services/{id}/deploy":                        "service.deploy",
+	"POST /services/{id}/rollback/{did}":                "service.rollback",
+	"POST /services/{id}/stop":                          "service.stop",
+	"POST /services/{id}/start":                         "service.start",
+	"POST /services/{id}/settings":                      "service.settings",
+	"POST /services/{id}/domains":                       "service.domain.add",
+	"POST /services/{id}/domains/{did}/delete":          "service.domain.remove",
+	"POST /services/{id}/domains/{did}/target":          "service.domain.target",
+	"POST /services/{id}/port":                          "service.port",
+	"POST /services/{id}/web":                           "service.web",
+	"POST /services/{id}/delete":                        "service.delete",
+	"POST /settings/password":                           "settings.password",
+	"POST /settings/domain":                             "settings.domain",
+	"POST /settings/alerts":                             "settings.alert.add",
+	"POST /settings/alerts/{cid}/delete":                "settings.alert.remove",
+	"POST /containers/{name}/{action}":                  "container.*", // * = 경로의 동작 (restart·stop·start·remove)
+	"POST /containers/projects/{project}/{action}":      "project.*",
+	"POST /containers":                                  "container.selected.*", // * = 폼의 동작, 대상 = 고른 이름들
+	"POST /containers/remove":                           "container.remove.many",
+	"POST /containers/{name}/networks":                  "container.network.attach",
+	"POST /containers/{name}/networks/{network}/detach": "container.network.detach",
+	"POST /networks":                                    "network.create",
+	"POST /networks/{name}/delete":                      "network.remove",
+	"POST /storage/images/{id}/delete":                  "image.remove",
+	"POST /storage/volumes/{name}/delete":               "volume.remove",
 }
 
 // statusRecorder는 처리 결과(상태 코드·보낸 곳)를 기억한다.
@@ -220,6 +225,17 @@ func (s *Server) audited(next http.Handler) http.Handler {
 			return
 		}
 		target := auditTarget(r.URL.Path)
+		switch action {
+		case "network.create":
+			target = strings.TrimSpace(r.FormValue("name"))
+		case "container.remove.many":
+			target = strings.Join(r.Form["c"], ", ")
+		case "container.network.attach":
+			target += " → " + strings.TrimSpace(r.FormValue("network"))
+		}
+		if len(target) > 200 {
+			target = target[:200] + "…"
+		}
 		if action == "container.selected.*" {
 			target = strings.Join(r.Form["c"], ", ")
 			if len(target) > 200 {

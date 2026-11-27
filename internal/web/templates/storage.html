@@ -2,8 +2,8 @@
 {{define "title"}}{{t "storage.title"}}{{end}}
 {{define "content"}}
 {{$v := .Data}}
-<a class="back" href="/containers">← {{t "containers.title"}}</a>
 <div class="page-head"><div><h1>{{t "storage.title"}}</h1><p>{{t "storage.sub"}}</p></div></div>
+{{template "dockertabs" "storage"}}
 {{template "error" .}}
 {{if not $v.DockerReadable}}<p class="flash bad">{{t "containers.unreachable"}}</p>{{else}}
 <div class="tiles">

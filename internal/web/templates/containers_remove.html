@@ -1,0 +1,36 @@
+{{define "root"}}{{template "app" .}}{{end}}
+{{define "title"}}{{t "remove.title" .Data.Count}}{{end}}
+{{define "content"}}{{$d := .Data}}
+<a class="back" href="/containers">← {{t "containers.title"}}</a>
+<div class="page-head"><div><h1>{{t "remove.title" $d.Count}}</h1><p>{{t "remove.sub"}}</p></div></div>
+{{template "error" .}}
+<form class="panel" method="post" action="/containers/remove">
+  <div class="table-scroll">
+  <table class="dt">
+    <colgroup><col><col class="c-state"><col class="c-what"></colgroup>
+    <thead><tr><th>{{t "containers.col.name"}}</th><th>{{t "containers.col.state"}}</th><th>{{t "remove.col.what"}}</th></tr></thead>
+    <tbody>
+    {{range $d.Rows}}
+    <tr class="{{if and .Skip (ne .Skip "running")}}off{{end}}">
+      <td class="name">{{if or (not .Skip) (eq .Skip "running")}}<input type="hidden" name="c" value="{{.Row.Name}}">{{end}}<span class="mono">{{if and .Skip (ne .Skip "running")}}{{template "icon-lock"}} {{end}}{{.Row.Name}}</span><span class="img">{{.Row.ImageLabel}}</span></td>
+      <td>{{template "cstate" .Row}}</td>
+      <td class="what">{{if eq .Skip ""}}{{t "remove.what.remove"}}{{if .Row.Service}}{{else if .Row.Ended}}{{end}}{{else if eq .Skip "running"}}<span class="warn-text">{{t "remove.what.running"}}</span>{{else}}<span class="muted">{{t (print "remove.what.skip." .Skip)}}</span>{{end}}</td>
+    </tr>
+    {{else}}<tr><td colspan="3" class="empty-row">{{t "remove.none"}}</td></tr>{{end}}
+    </tbody>
+  </table>
+  </div>
+  {{if $d.Count}}
+  <div class="confirm-box">
+    {{if $d.Running}}<label class="check-label"><input type="checkbox" name="stop" value="1"> <span>{{t "remove.stop" $d.Running}} <small class="muted">{{t "remove.stop.note"}}</small></span></label>{{end}}
+    <label class="check-label"><input type="checkbox" name="volumes" value="1"> <span>{{t "remove.volumes"}} <small class="muted">{{t "remove.volumes.note"}}</small></span></label>
+    <div class="inline-form">
+      <span class="small">{{t "remove.type" $d.Word}}</span>
+      <input class="input confirm-input" name="confirm" placeholder="{{$d.Word}}" aria-label="{{t "remove.type" $d.Word}}" autocomplete="off">
+      <button class="btn danger" type="submit">{{template "icon-trash"}}{{t "remove.button" $d.Count}}</button>
+      <a class="btn quiet" href="/containers">{{t "remove.cancel"}}</a>
+    </div>
+  </div>
+  {{end}}
+</form>
+{{end}}

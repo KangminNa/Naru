@@ -33,6 +33,10 @@ func (f *fakeJoiner) Join(_ context.Context, net, c string) error {
 	f.nets[c] = append(f.nets[c], model.DockerNetwork{Name: net, UserDefined: true})
 	return nil
 }
+func (f *fakeJoiner) JoinAs(ctx context.Context, net, c string, _ []string) error {
+	return f.Join(ctx, net, c)
+}
+
 func (f *fakeJoiner) Leave(_ context.Context, net, c string) error {
 	f.calls = append(f.calls, "leave "+net)
 	var keep []model.DockerNetwork

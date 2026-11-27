@@ -277,6 +277,8 @@ var okKeys = map[string]string{
 	"restart": "ok.container.restart", "stop": "ok.container.stop", "start": "ok.container.start", "removed": "ok.container.removed",
 	"project-restart": "ok.project.restart", "project-stop": "ok.project.stop", "project-start": "ok.project.start",
 	"image-removed": "ok.image.removed", "volume-removed": "ok.volume.removed",
+	"removed-many": "ok.removed.many", "removed-some": "ok.removed.some", "attached": "ok.attached", "detached": "ok.detached",
+	"network-created": "ok.network.created", "network-removed": "ok.network.removed",
 	"selected-restart": "ok.selected.restart", "selected-stop": "ok.selected.stop", "selected-start": "ok.selected.start",
 }
 

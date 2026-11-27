@@ -593,6 +593,31 @@ func ParseNetworkNames(text string) (NetworkNames, error) {
 	return NetworkNames{strings.Join(names, " ")}, nil
 }
 
+// NetworkName은 네트워크 이름 하나다 — 만들거나 컨테이너에 붙일 때. 기본 네트워크(bridge·host·none)는 받지 않는다.
+type NetworkName struct{ v string }
+
+func ParseNetworkName(s string) (NetworkName, error) {
+	s = strings.TrimSpace(s)
+	if !networkNamePattern.MatchString(s) || IsDefaultNetwork(s) {
+		return NetworkName{}, InputError{Field: "network", Code: "network"}
+	}
+	return NetworkName{s}, nil
+}
+
+func (n NetworkName) String() string { return n.v }
+
+// ParseNetworkAlias는 네트워크 안에서 부를 다른 이름이다 — 비어도 된다.
+func ParseNetworkAlias(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s != "" && !networkNamePattern.MatchString(s) {
+		return "", InputError{Field: "alias", Code: "alias"}
+	}
+	return s, nil
+}
+
+// IsDefaultNetwork는 Docker가 처음부터 둔 네트워크인가 (bridge·host·none) — 다루지 않는다.
+func IsDefaultNetwork(name string) bool { return name == "bridge" || name == "host" || name == "none" }
+
 func (n NetworkNames) String() string { return n.text }
 func (n NetworkNames) IsZero() bool   { return n.text == "" }
 

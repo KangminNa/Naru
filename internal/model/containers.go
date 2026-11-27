@@ -87,6 +87,8 @@ type ContainerGroup struct {
 type ContainerView struct {
 	Row       ContainerRow
 	Project   string
+	Networks  []NetworkAttachment // 붙은 네트워크 (이름순)
+	Joinable  []string            // 더 붙일 수 있는 네트워크 (이름순) — 잠긴 컨테이너면 비어 있다
 	Started   time.Time
 	Restarts  int
 	Mounts    []string // "/서버경로 → /컨테이너경로", "볼륨이름 (볼륨) → /경로"
@@ -112,6 +114,52 @@ func HealthOf(status string) string {
 // EndedOK는 한 번 돌고 잘 끝난 컨테이너인가 (마이그레이션 같은 것) — 다시 띄우지 않는다.
 func EndedOK(state, status string) bool {
 	return state == "exited" && strings.HasPrefix(status, "Exited (0)")
+}
+
+// ── 여러 컨테이너 지우기 ───────────────────
+
+// RemoveOptions는 여러 컨테이너 지우기의 선택이다.
+type RemoveOptions struct {
+	StopRunning bool // 돌고 있는 것은 멈추고 지운다 (강제 없음)
+	AnonVolumes bool // 이름 없는 볼륨도 (이름 있는 볼륨은 Docker도 이 방법으로는 지우지 않는다)
+}
+
+// RemovalRow는 지우기 확인 화면의 한 줄이다.
+type RemovalRow struct {
+	Row  ContainerRow
+	Skip string // 건너뛰는 이유 (Locked… · "running" = 돌고 있다 — 멈추고 지우기를 고르면 지운다). 비면 지운다
+}
+
+// RemovalResult는 지우기 결과다.
+type RemovalResult struct {
+	Removed []string
+	Skipped []string // 보호된 것, 돌고 있는데 "멈추고 지우기"를 고르지 않은 것
+	Failed  []string
+}
+
+// ── 네트워크 ──────────────────────────────
+
+// 네트워크를 다루지 못하는 이유 (NetworkRow.Locked · NetworkAttachment.Locked) — 문구 키 networks.locked.<이유>
+const (
+	LockedDefault = "default" // Docker 기본 (bridge·host·none)
+	LockedApp     = "app"     // Naru 앱 네트워크 — 웹서버가 앱에 닿는 길
+)
+
+// NetworkRow는 네트워크 화면의 한 줄이다.
+type NetworkRow struct {
+	Name, Driver, Subnet string
+	Internal             bool     // 바깥으로 나가지 못하는 네트워크
+	Containers           []string // 붙은 컨테이너 (이름순)
+	Project              string   // compose 묶음 라벨
+	Locked               string   // LockedDefault · LockedApp — 비면 (쓰지 않을 때) 지울 수 있다
+}
+
+// NetworkAttachment는 컨테이너 하나가 붙은 네트워크다 — 상세 화면의 네트워크 패널.
+type NetworkAttachment struct {
+	Name    string
+	IP      string
+	Aliases []string // 그 네트워크에서 부르는 다른 이름 (컨테이너 이름·ID 앞자리는 빼고)
+	Locked  string   // 떼지 못하는 이유 — LockedDefault · LockedApp · Locked… (컨테이너가 잠겼으면 그 이유)
 }
 
 // ── 이미지 · 볼륨 ─────────────────────────

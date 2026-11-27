@@ -1,0 +1,38 @@
+{{define "root"}}{{template "app" .}}{{end}}
+{{define "title"}}{{t "networks.title"}}{{end}}
+{{define "content"}}{{$d := .Data}}
+<div class="page-head"><div><h1>{{t "networks.title"}}</h1><p>{{t "networks.sub"}}</p></div></div>
+{{template "dockertabs" "networks"}}
+{{template "error" .}}
+{{if $d.Unreachable}}<p class="flash bad">{{t "containers.unreachable"}}</p>{{else}}
+<div class="panel">
+  <form class="toolbar" method="post" action="/networks">
+    <span class="tb-title">{{template "icon-plus"}}{{t "networks.create"}}</span>
+    <input class="input tb-input mono" name="name" value="{{$d.Name}}" placeholder="my-net" aria-label="{{t "networks.col.name"}}" autocomplete="off">
+    <label class="check-label small"><input type="checkbox" name="internal" value="1" {{if $d.Internal}}checked{{end}}> {{t "networks.internal"}}</label>
+    <button class="btn small primary" type="submit">{{t "networks.create.button"}}</button>
+    <span class="spacer"></span><span class="muted small">{{t "networks.internal.note"}}</span>
+  </form>
+  <div class="table-scroll">
+  <table class="dt">
+    <colgroup><col class="c-net"><col class="c-driver"><col class="c-subnet"><col><col class="c-del"></colgroup>
+    <thead><tr><th>{{t "networks.col.name"}}</th><th>{{t "networks.col.driver"}}</th><th>{{t "networks.col.subnet"}}</th><th>{{t "networks.col.containers"}}</th><th></th></tr></thead>
+    <tbody>
+    {{range $d.Rows}}
+    <tr class="{{if eq .Locked "default"}}off{{end}}">
+      <td class="name"><span class="mono">{{.Name}}</span>{{with .Project}}<span class="img">{{t "containers.inproject" .}}</span>{{end}}</td>
+      <td>{{.Driver}}{{if .Internal}} <span class="badge muted">{{t "networks.internal"}}</span>{{end}}</td>
+      <td class="mono small muted">{{with .Subnet}}{{.}}{{else}}—{{end}}</td>
+      <td class="members">{{range $i, $c := .Containers}}{{if lt $i 6}}<a class="member mono" href="/containers/{{$c}}">{{$c}}</a>{{end}}{{else}}<span class="badge muted">{{t "storage.notused"}}</span>{{end}}{{if gt (len .Containers) 6}}<span class="muted small">+{{len .Containers}}</span>{{end}}</td>
+      <td>{{if .Locked}}<span class="lock-note">{{template "icon-lock"}}{{t (print "networks.locked." .Locked)}}</span>{{else if not .Containers}}<form method="post" action="/networks/{{.Name}}/delete" class="del-form">
+        <input class="input" name="confirm" placeholder="{{.Name}}" aria-label="{{t "storage.confirm" .Name}}" autocomplete="off">
+        <button class="btn tiny danger" type="submit">{{template "icon-trash"}}{{t "storage.delete"}}</button></form>{{end}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+</div>
+<p class="foot-note">{{t "networks.note"}}</p>
+{{end}}
+{{end}}

@@ -152,6 +152,8 @@
 | `ContainerFinder` | Naru가 띄우지 않은, 이 서버의 다른 컨테이너를 찾는다 — 홈의 목록(compose 묶음별, 어느 외부 연결 서비스가 보내는지, 기본 bridge에만 있는지), 외부 연결 칸의 제안, 저장소로 옮길 때 채울 값(환경 변수는 이름만). **보기만 한다** | `containerFinder` |
 | `ContainerBoard` | 컨테이너 화면 — 이 서버의 **모든** 컨테이너(compose 묶음별, 상태·상태 검사·CPU/메모리·포트·보내는 주소), 상세(환경 변수는 **이름만**, 붙인 것, 상태 검사의 마지막 출력, 최근 로그 500줄과 찾기), 다시 시작·멈추기·켜기·**멈춘 것만** 지우기, 묶음 다시 시작·멈추기·켜기(한 번 돌고 끝난 것은 건드리지 않는다). Naru 자신·웹서버·Naru 서비스의 것은 `ErrProtected` | `containerBoard` |
 | `StorageBoard` | 이미지·볼륨 화면 — 크기·쓰는 컨테이너 수, 안 쓰는 것 먼저. 하나씩만 지운다(강제 없음, 쓰는 중이면 `ErrInUse`). 한꺼번에 정리(prune)는 없다 | `storageBoard` |
+| `RemovalBoard` | 여러 컨테이너 지우기 — 확인 화면(고른 것마다 지울지·건너뛸지·돌고 있는지)을 먼저 그리고 지운다. 보호된 것은 건너뛰고, 돌고 있는 것은 "멈추고 지우기"일 때만 멈춘 뒤 지운다(강제 없음). 이름 없는 볼륨은 고르면 함께 | `removalBoard` |
+| `NetworkBoard` | 네트워크 화면(목록·만들기·안 쓰는 것 지우기)과 컨테이너 상세의 붙이기(별칭 선택)·떼기. 기본 네트워크는 다루지 않고, 앱 네트워크는 지우지 않으며, Naru 자신·웹서버·Naru 서비스의 네트워크는 건드리지 않는다(`ErrProtected`) | `networkBoard` |
 | `ServerStats` | 서버의 CPU·메모리·디스크를 알려준다 | `stats.ProcSampler` |
 | `MonitorViewer` | 서버 화면 — 기간(1시간·24시간·7일·30일)의 자원 기록을 칸으로 묶은 그래프, 그 기간에 일어난 일, 서비스별 사용·다시 시작 횟수 — 과 관리 기록을 모은다 | `monitorViewer` |
 | `MetricStore` | 서버·서비스 자원 사용 기록. 1분 값 2일, 1시간 값(평균·최고) 30일 | `store.Metrics` |
@@ -189,6 +191,7 @@
 | `ContainerSweeper` | 멈춘 컨테이너 하나를 지운다 — 강제하지 않는다(돌고 있으면 `ErrRunning`) | `docker.Containers` |
 | `DiskUsageReader` | 이미지·볼륨과 크기·쓰는 컨테이너 수 (`docker system df`, 몇 초) | `docker.Containers` |
 | `VolumeRemover` | 볼륨 하나를 지운다 — 강제하지 않는다(쓰는 중이면 `ErrInUse`) | `docker.Containers` |
+| `NetworkStore` | 이 서버의 네트워크(종류·서브넷·내부 전용·붙은 컨테이너·compose 묶음)를 읽고, bridge 네트워크를 만들고, 지운다 — 강제 없음(붙은 것이 있으면 `ErrInUse`) | `docker.Containers` |
 | `AccessLogReader` | 웹서버가 남긴 요청 기록 파일에서 그 주소들의 최근 요청을 읽는다 (파일 끝 4MB만) | `caddy.AccessLogFile` |
 | `AlertSender` | 알림 하나를 그 주소의 형식으로 보낸다 (10초 제한, 응답 본문은 읽고 버린다) | `httppost.AlertPoster` |
 | `SnippetCompiler` | 고급 칸의 Caddyfile 지시어를 웹서버 형식으로 바꾼다 — 그 사이트의 경로 처리만 꺼내고 나머지는 "적용되지 않음"으로 알린다 | `caddy.AdaptCompiler` (Caddy 관리 API `/adapt`) |
@@ -359,6 +362,8 @@ Naru와 Caddy는 컨테이너 둘로, 앱 컨테이너와 같은 Docker 네트�
 | `ContainerRow` · `ContainerGroup` | 컨테이너 화면 한 줄(상태·상태 검사·서버에 연 포트·안에서만 연 포트·네트워크·CPU/메모리·누구의 것인지·보내는 주소·막는 이유) · compose 묶음 하나(실행 수, 묶음 동작을 막는 이유) |
 | `ContainerView` | 컨테이너 상세 — 시작 시각, 다시 시작된 횟수, 붙인 것, 환경 변수 **이름만**, 상태 검사의 마지막 출력, 최근 로그(찾은 것) |
 | `DockerDisk` · `DiskImage` · `DiskVolume` · `StorageView` | `docker system df` — 이미지(ID·태그·크기·만든 때·쓰는 컨테이너 수) · 볼륨(이름·크기·쓰는 수·compose 묶음) · 이미지·볼륨 화면(안 쓰는 크기 합) |
+| `RemoveOptions` · `RemovalRow` · `RemovalResult` | 여러 컨테이너 지우기의 선택(멈추고 지우기, 이름 없는 볼륨도) · 확인 화면 한 줄(건너뛰는 이유) · 결과(지운 것·건너뛴 것·실패한 것) |
+| `NetworkName` · `NetworkRow` · `NetworkAttachment` | 네트워크 이름 하나(기본 네트워크는 받지 않는다) · 네트워크 화면 한 줄(잠긴 이유: Docker 기본·앱 네트워크) · 컨테이너 하나가 붙은 네트워크(IP·별칭·뗄 수 없는 이유) |
 | `Deployment` | 배포 한 번의 기록 |
 | `DeployStatus` | 진행 중 · 성공 · 실패 |
 | `DeployReason` | 왜 배포했나 — 직접 · push · 처음 올림 · 되돌림 |
@@ -917,8 +922,32 @@ type ContainerSwitch interface {
 	Restart(ctx context.Context, name string) error
 }
 // ContainerSweeper는 멈춘 컨테이너 하나를 지운다. 강제하지 않는다 — 돌고 있으면 model.ErrRunning.
+// anonVolumes면 이름 없는 볼륨도 함께 (이름 있는 볼륨은 Docker도 지우지 않는다).
 type ContainerSweeper interface {
-	RemoveStopped(ctx context.Context, name string) error
+	RemoveStopped(ctx context.Context, name string, anonVolumes bool) error
+}
+
+// NetworkStore는 이 서버의 네트워크를 읽고, 만들고, 지운다. 지우기는 강제하지 않는다 — 붙은 것이 있으면 model.ErrInUse.
+type NetworkStore interface {
+	Networks(ctx context.Context) ([]model.NetworkRow, error) // Locked는 비어 있다 — 보호는 화면 쪽이 정한다
+	CreateNetwork(ctx context.Context, name model.NetworkName, internal bool) error
+	RemoveNetwork(ctx context.Context, name string) error
+}
+
+// RemovalBoard는 여러 컨테이너 지우기다 — 확인 화면(Plan)을 먼저 그리고 지운다. 보호된 것은 건너뛴다.
+type RemovalBoard interface {
+	Plan(ctx context.Context, names []string) ([]model.RemovalRow, error)
+	Remove(ctx context.Context, names []string, o model.RemoveOptions) (model.RemovalResult, error)
+}
+
+// NetworkBoard는 네트워크 화면과 컨테이너 상세의 붙이기·떼기다. 보호 규칙을 여기서 지킨다 (model.ErrProtected):
+// 기본 네트워크는 다루지 않고, 앱 네트워크는 지우지 않으며, Naru 자신·웹서버·Naru 서비스의 네트워크는 건드리지 않는다.
+type NetworkBoard interface {
+	List(ctx context.Context) ([]model.NetworkRow, error)
+	Create(ctx context.Context, name model.NetworkName, internal bool) error
+	Remove(ctx context.Context, name string) error
+	Attach(ctx context.Context, container string, network model.NetworkName, alias string) error
+	Detach(ctx context.Context, container, network string) error
 }
 
 // DiskUsageReader는 이미지·볼륨과 크기·쓰는 컨테이너 수를 읽는다 (docker system df — 몇 초 걸린다).
@@ -1033,6 +1062,7 @@ type ContainerInspector interface {
 type NetworkJoiner interface {
 	NetworksOf(ctx context.Context, container string) ([]model.DockerNetwork, error) // 없는 컨테이너면 model.ErrNotFound
 	Join(ctx context.Context, network, container string) error                       // 이미 붙어 있으면 그대로
+	JoinAs(ctx context.Context, network, container string, aliases []string) error   // 별칭을 주어 붙인다 (이미 붙어 있으면 그대로)
 	Leave(ctx context.Context, network, container string) error
 }
 

@@ -47,6 +47,30 @@
   </section>
 </div>
 
+<section class="panel gap-top" id="networks">
+  <div class="panel-h"><h2>{{template "icon-network"}} {{t "tabs.networks"}}</h2><span class="spacer"></span><a class="small tag-link" href="/networks">{{t "networks.all"}} →</a></div>
+  <div class="table-scroll">
+  <table class="dt">
+    <colgroup><col class="c-net"><col><col class="c-del"></colgroup>
+    <thead><tr><th>{{t "networks.col.name"}}</th><th>{{t "networks.col.addr"}}</th><th></th></tr></thead>
+    <tbody>
+    {{range $v.Networks}}
+    <tr><td class="mono">{{.Name}}</td>
+      <td class="mono small">{{with .IP}}{{.}}{{else}}<span class="muted">—</span>{{end}}{{range .Aliases}} <span class="badge muted">{{.}}</span>{{end}}</td>
+      <td>{{if .Locked}}<span class="lock-note">{{template "icon-lock"}}{{t (print "networks.lockedby." .Locked)}}</span>{{else}}<form method="post" action="/containers/{{$r.Name}}/networks/{{.Name}}/detach" class="del-form"><button class="btn tiny" type="submit">{{t "networks.detach"}}</button></form>{{end}}</td></tr>
+    {{else}}<tr><td colspan="3" class="empty-row">—</td></tr>{{end}}
+    </tbody>
+  </table>
+  </div>
+  {{if not $r.Locked}}{{if $v.Joinable}}
+  <form class="toolbar attach" method="post" action="/containers/{{$r.Name}}/networks">
+    <select class="input tb-input" name="network" aria-label="{{t "networks.pick"}}">{{range $v.Joinable}}<option value="{{.}}">{{.}}</option>{{end}}</select>
+    <input class="input tb-input mono" name="alias" placeholder="{{t "networks.alias"}}" aria-label="{{t "networks.alias"}}" autocomplete="off">
+    <button class="btn small" type="submit">{{template "icon-plus"}}{{t "networks.attach"}}</button>
+    {{if $v.Project}}<span class="muted small">{{t "networks.compose.note"}}</span>{{end}}
+  </form>{{end}}{{end}}
+</section>
+
 <section class="panel gap-top">
   <div class="panel-h"><h2>{{t "containers.logs"}}</h2><span class="spacer"></span>
     <a class="btn tiny" href="/containers/{{$r.Name}}?q={{$v.Query}}">{{template "icon-restart"}}{{t "logs.refresh"}}</a>

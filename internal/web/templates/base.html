@@ -93,3 +93,13 @@
 {{define "icon-stack"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5zM3 13l9 5 9-5"/></svg>{{end}}
 {{define "icon-trash"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>{{end}}
 {{define "icon-download"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>{{end}}
+
+{{/* 컨테이너 · 이미지·볼륨 · 네트워크 탭 */}}
+{{define "dockertabs"}}<nav class="tabs" aria-label="Docker">
+  <a href="/containers" {{if eq . "containers"}}aria-current="page"{{end}}>{{template "icon-box"}}{{t "tabs.containers"}}</a>
+  <a href="/storage" {{if eq . "storage"}}aria-current="page"{{end}}>{{template "icon-stack"}}{{t "tabs.storage"}}</a>
+  <a href="/networks" {{if eq . "networks"}}aria-current="page"{{end}}>{{template "icon-network"}}{{t "tabs.networks"}}</a>
+</nav>{{end}}
+{{define "icon-box"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12v9M12 12 4 7.5"/></svg>{{end}}
+{{define "icon-network"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-2h12v2"/></svg>{{end}}
+{{define "icon-plus"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>{{end}}

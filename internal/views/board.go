@@ -20,9 +20,11 @@ type BoardParts struct {
 	Logs       contract.ContainerLogReader
 	Switch     contract.ContainerSwitch
 	Sweeper    contract.ContainerSweeper
-	Usage      contract.UsageBoard // 없으면 사용량을 비워 둔다
-	Self       string              // Naru 자신의 컨테이너 이름
-	WebServer  string              // 웹서버 컨테이너 이름
+	Usage      contract.UsageBoard   // 없으면 사용량을 비워 둔다
+	Networks   contract.NetworkStore // 상세의 "붙일 수 있는 네트워크" (없으면 비워 둔다)
+	Self       string                // Naru 자신의 컨테이너 이름
+	WebServer  string                // 웹서버 컨테이너 이름
+	AppNetwork string                // Naru 앱 네트워크 — 지우지 않는다
 }
 
 // containerBoard는 이 서버의 모든 컨테이너를 보여 주고, 다시 시작·멈추기·켜기·멈춘 것 지우기를 한다.
@@ -98,6 +100,25 @@ func (b containerBoard) Detail(ctx context.Context, name, query string) (model.C
 		for _, m := range d.NamedVolumes {
 			v.Mounts = append(v.Mounts, mountLine(m, true))
 		}
+		for _, n := range d.Networks {
+			n.Locked = attachmentLock(r.ContainerRow, n.Name)
+			v.Networks = append(v.Networks, n)
+		}
+	}
+	if b.p.Networks != nil && r.Locked == "" {
+		nctx, ncancel := context.WithTimeout(ctx, 3*time.Second)
+		defer ncancel()
+		if all, err := b.p.Networks.Networks(nctx); err == nil {
+			on := map[string]bool{}
+			for _, n := range v.Networks {
+				on[n.Name] = true
+			}
+			for _, n := range all {
+				if !on[n.Name] && !model.IsDefaultNetwork(n.Name) && n.Driver != "host" && n.Driver != "null" {
+					v.Joinable = append(v.Joinable, n.Name)
+				}
+			}
+		}
 	}
 	lctx, lcancel := context.WithTimeout(ctx, 5*time.Second)
 	defer lcancel()
@@ -127,7 +148,7 @@ func (b containerBoard) Act(ctx context.Context, name string, a model.ContainerA
 		if r.Running() || r.State == "restarting" {
 			return model.ErrRunning
 		}
-		return b.p.Sweeper.RemoveStopped(ctx, name)
+		return b.p.Sweeper.RemoveStopped(ctx, name, false)
 	}
 	return model.InputError{Field: "action", Code: "action"}
 }

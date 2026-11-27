@@ -44,6 +44,9 @@ func (f *fakeDocker) NetworksOf(context.Context, string) ([]model.DockerNetwork,
 	return nil, nil
 }
 func (f *fakeDocker) Leave(context.Context, string, string) error { return nil }
+func (f *fakeDocker) JoinAs(ctx context.Context, network, name string, _ []string) error {
+	return f.Join(ctx, network, name)
+}
 func (f *fakeDocker) Join(_ context.Context, network, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

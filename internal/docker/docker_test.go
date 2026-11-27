@@ -425,13 +425,13 @@ func TestContainerScreenCalls(t *testing.T) {
 	if err := k.Restart(ctx, "web"); err != nil {
 		t.Fatal(err)
 	}
-	if err := k.RemoveStopped(ctx, "busy"); !errors.Is(err, model.ErrRunning) {
+	if err := k.RemoveStopped(ctx, "busy", false); !errors.Is(err, model.ErrRunning) {
 		t.Fatalf("a running container: %v", err)
 	}
-	if err := k.RemoveStopped(ctx, "old"); err != nil {
+	if err := k.RemoveStopped(ctx, "old", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := k.RemoveStopped(ctx, "gone"); !errors.Is(err, model.ErrNotFound) {
+	if err := k.RemoveStopped(ctx, "gone", false); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("%v", err)
 	}
 	if err := k.RemoveVolume(ctx, "used"); !errors.Is(err, model.ErrInUse) {
@@ -464,5 +464,89 @@ func TestContainerScreenCalls(t *testing.T) {
 	}
 	if m := all["mail"]; fmt.Sprint(m.Published) != "[25 993]" || fmt.Sprint(m.Ports) != "[25 993 8080]" {
 		t.Fatalf("ports on the server vs. inside: %+v", m)
+	}
+}
+
+// 네트워크 — 목록(붙은 것은 컨테이너 목록에서), 만들기, 지우기의 거절, 별칭, 상세의 IP·별칭, 익명 볼륨 지우기.
+func TestNetworkCalls(t *testing.T) {
+	var calls []string
+	sock := fakeDocker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		calls = append(calls, r.Method+" "+r.URL.RequestURI()+" "+string(body))
+		switch r.Method + " " + r.URL.Path {
+		case "GET /networks":
+			w.Write([]byte(`[{"Name":"shop_default","Driver":"bridge","Internal":false,"Labels":{"com.docker.compose.project":"shop"},"IPAM":{"Config":[{"Subnet":"172.20.0.0/16"}]}},
+				{"Name":"db-only","Driver":"bridge","Internal":true,"IPAM":{"Config":[]}},{"Name":"host","Driver":"host"}]`))
+		case "GET /containers/json":
+			w.Write([]byte(`[{"Names":["/shop-web-1"],"State":"running","NetworkSettings":{"Networks":{"shop_default":{}}}},
+				{"Names":["/shop-db-1"],"State":"running","NetworkSettings":{"Networks":{"shop_default":{},"db-only":{}}}}]`))
+		case "POST /networks/create":
+			if strings.Contains(string(body), `"Name":"taken"`) {
+				w.WriteHeader(http.StatusConflict)
+				w.Write([]byte(`{"message":"network with name taken already exists"}`))
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"Id":"abc"}`))
+		case "DELETE /networks/busy":
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"message":"error while removing network: network busy id abc has active endpoints"}`))
+		case "DELETE /networks/free":
+			w.WriteHeader(http.StatusNoContent)
+		case "POST /networks/shop_default/connect":
+			w.WriteHeader(http.StatusOK)
+		case "DELETE /containers/old":
+			w.WriteHeader(http.StatusNoContent)
+		case "GET /containers/web/json":
+			w.Write([]byte(`{"Name":"/web","NetworkSettings":{"Networks":{"shop_default":{"IPAddress":"172.20.0.3","Aliases":["web","3f2a9c1b7d4e","api"]}}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	ctx := context.Background()
+	k := NewContainers(New(sock))
+	rows, err := k.Networks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 || rows[0].Name != "db-only" || !rows[0].Internal || strings.Join(rows[0].Containers, ",") != "shop-db-1" ||
+		rows[2].Name != "shop_default" || rows[2].Subnet != "172.20.0.0/16" || rows[2].Project != "shop" || strings.Join(rows[2].Containers, ",") != "shop-db-1,shop-web-1" {
+		t.Fatalf("%+v", rows)
+	}
+	taken, _ := model.ParseNetworkName("taken")
+	if err := k.CreateNetwork(ctx, taken, false); !errors.Is(err, model.ErrInUse) {
+		t.Fatalf("%v", err)
+	}
+	fresh, _ := model.ParseNetworkName("fresh")
+	if err := k.CreateNetwork(ctx, fresh, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.RemoveNetwork(ctx, "busy"); !errors.Is(err, model.ErrInUse) {
+		t.Fatalf("active endpoints: %v", err)
+	}
+	if err := k.RemoveNetwork(ctx, "free"); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.JoinAs(ctx, "shop_default", "web", []string{"api"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.RemoveStopped(ctx, "old", true); err != nil {
+		t.Fatal(err)
+	}
+	d, err := k.Inspect(ctx, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Networks) != 1 || d.Networks[0].IP != "172.20.0.3" || strings.Join(d.Networks[0].Aliases, ",") != "api" {
+		t.Fatalf("own name and short id are not aliases: %+v", d.Networks)
+	}
+	joined := strings.Join(calls, "\n")
+	for _, want := range []string{`"Internal":true`, `"Aliases":["api"]`, "DELETE /containers/old?v=1 "} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "force") {
+		t.Fatal("nothing is forced")
 	}
 }

@@ -7,9 +7,9 @@
 
 {{$fromRepo := or (eq $f.Kind "repo") (eq $f.Kind "compose") (eq $f.Kind "static")}}
 <div class="kinds">
-  <a class="kind{{if $fromRepo}} on{{end}}" href="/services/new?kind=repo"><b>{{t "source.repo"}}</b><span>{{t "source.repo.desc"}}</span></a>
-  <a class="kind{{if eq $f.Kind "image"}} on{{end}}" href="/services/new?kind=image"><b>{{t "kind.image"}}</b><span>{{t "kind.image.desc"}}</span></a>
-  <a class="kind{{if eq $f.Kind "external"}} on{{end}}" href="/services/new?kind=external"><b>{{t "kind.external"}}</b><span>{{t "kind.external.desc"}}</span></a>
+  <a class="kind{{if $fromRepo}} on{{end}}" href="/services/new?kind=repo"><span class="kind-icon">{{template "icon-git"}}</span><b>{{t "source.repo"}}</b><span>{{t "source.repo.desc"}}</span></a>
+  <a class="kind{{if eq $f.Kind "image"}} on{{end}}" href="/services/new?kind=image"><span class="kind-icon">{{template "icon-box"}}</span><b>{{t "kind.image"}}</b><span>{{t "kind.image.desc"}}</span></a>
+  <a class="kind{{if eq $f.Kind "external"}} on{{end}}" href="/services/new?kind=external"><span class="kind-icon">{{template "icon-link"}}</span><b>{{t "kind.external"}}</b><span>{{t "kind.external.desc"}}</span></a>
 </div>
 {{if $fromRepo}}
 <div class="method">
@@ -24,7 +24,7 @@
 {{end}}
 
 {{if $f.Kind}}
-<section class="section narrow-form">
+<section class="section new-form">
   {{template "error" .}}
   <form method="post" action="/services/new" class="form">
     <input type="hidden" name="kind" value="{{$f.Kind}}">

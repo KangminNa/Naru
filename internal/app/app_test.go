@@ -1539,7 +1539,7 @@ func TestHomeSumsUpAndTheContainersPageListsEverything(t *testing.T) {
 	}
 
 	_, _, page := h.get("/containers")
-	for _, want := range []string{"cairn", "compose 묶음 · 4개 · 3개 실행 중", "따로 띄운 것", `href="/containers/cairn-web-1"`, "Up 3 days (healthy)",
+	for _, want := range []string{"cairn", "compose 묶음, 4개 중 3개 실행", "따로 띄운 것", `href="/containers/cairn-web-1"`, "Up 3 days (healthy)",
 		`href="/services/new?kind=external&amp;upstream=cairn-web-1%3a3000"`, "기본 bridge에만 있어요", "Exited (1) 5 days ago", "끝남 (0)",
 		`action="/containers/projects/cairn/restart"`, "Naru 자신이 든 묶음", "naru-app-1", "app 서비스"} {
 		if !strings.Contains(page, want) {
@@ -2478,5 +2478,40 @@ func TestNetworksPageAndAttaching(t *testing.T) {
 		if !strings.Contains(settings, want) {
 			t.Errorf("activity log is missing %q", want)
 		}
+	}
+}
+
+// 사이드바와 테마 — 고른 테마는 쿠키로 기억하고 html에 처음부터 적는다 (깜빡이지 않게). 자동이면 시스템 설정.
+func TestSidebarAndTheme(t *testing.T) {
+	h := newHarness(t, "")
+	h.signedIn()
+	_, _, page := h.get("/containers")
+	for _, want := range []string{`class="side"`, `<span class="wm-name">나루</span>`, `href="/networks"`, `href="/storage"`, `href="/containers" aria-current="page"`,
+		`href="/theme/dark?back=%2fcontainers"`, `<title>컨테이너 · 나루</title>`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(page, "data-theme=") {
+		t.Fatal("auto by default — no theme attribute")
+	}
+	if code, loc, _ := h.get("/theme/dark?back=/server"); code != http.StatusSeeOther || loc != "/server" {
+		t.Fatalf("%d %s", code, loc)
+	}
+	if _, _, page := h.get("/server"); !strings.Contains(page, `data-theme="dark"`) || !strings.Contains(page, `href="/theme/dark?back=%2fserver" aria-current="true"`) {
+		t.Fatal("dark is remembered")
+	}
+	if _, loc, _ := h.get("/theme/light?back=//evil.example"); loc != "/" {
+		t.Fatalf("back stays on this site: %s", loc)
+	}
+	h.get("/theme/auto?back=/")
+	if _, _, page := h.get("/"); strings.Contains(page, "data-theme=") {
+		t.Fatal("auto clears it")
+	}
+	if _, _, page := h.get("/lang/en?back=/"); true {
+		_ = page
+	}
+	if _, _, page := h.get("/"); !strings.Contains(page, `<span class="wm-name">Naru</span>`) {
+		t.Fatal("the English screens say Naru")
 	}
 }

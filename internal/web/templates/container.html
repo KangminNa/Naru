@@ -18,7 +18,7 @@
   </div>{{end}}
 </div>
 {{template "error" .}}
-{{if $r.Locked}}<p class="flash warn">{{if $r.Service}}{{t "containers.locked.service"}} <a class="tag-link" href="/services/{{$r.Service}}">{{t "containers.ofservice" $r.ServiceName}} →</a>{{else}}{{t (print "containers.locked." $r.Locked)}}{{end}}</p>{{end}}
+{{if $r.Locked}}<p class="flash warn">{{if $r.Service}}{{t "containers.locked.service"}} <a class="tag-link" href="/services/{{$r.Service}}">{{t "containers.ofservice" $r.ServiceName}}</a>{{else}}{{t (print "containers.locked." $r.Locked)}}{{end}}</p>{{end}}
 
 <div class="tiles">
   <div class="tile"><span>CPU</span><b>{{with $r.Usage}}{{cpu .CPUPercent}}{{else}}—{{end}}</b></div>
@@ -48,7 +48,7 @@
 </div>
 
 <section class="panel gap-top" id="networks">
-  <div class="panel-h"><h2>{{template "icon-network"}} {{t "tabs.networks"}}</h2><span class="spacer"></span><a class="small tag-link" href="/networks">{{t "networks.all"}} →</a></div>
+  <div class="panel-h"><h2>{{template "icon-network"}} {{t "tabs.networks"}}</h2><span class="spacer"></span><a class="small tag-link" href="/networks">{{t "networks.all"}}</a></div>
   <div class="table-scroll">
   <table class="dt">
     <colgroup><col class="c-net"><col><col class="c-del"></colgroup>

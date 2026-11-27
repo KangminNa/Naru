@@ -402,7 +402,7 @@ func (a *App) assemble() error {
 
 	srv, err := web.New(web.Deps{
 		Login: login, Accounts: a.Accounts, SetupKey: a.key, AdminDomain: adminDomain, CertEmail: certEmail, Setup: setup,
-		Launcher: launcher, Editor: editor, Viewer: viewer, Finder: finder, Containers: board, Storage: storage, Removal: removal, Networks: networks, Monitor: monitor, Audit: auditLog, Targets: targets, Deployer: deployer, Control: control, Hooks: hooks,
+		Launcher: launcher, Editor: editor, Viewer: viewer, Finder: finder, Watch: watcher, Containers: board, Storage: storage, Removal: removal, Networks: networks, Monitor: monitor, Audit: auditLog, Targets: targets, Deployer: deployer, Control: control, Hooks: hooks,
 		Stats: out.Stats, WebServer: sync, DNS: out.DNS, Certs: out.Certs, Clock: out.Clock, Log: a.log,
 		WebSettings: webSettings, Nginx: websettings.NginxReader{}, Alerts: alertSettings, DataDir: cfg.DataDir, Version: cfg.Version,
 	})

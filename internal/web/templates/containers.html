@@ -4,7 +4,6 @@
 <div class="page-head">
   <div><h1>{{t "containers.title"}}</h1><p>{{t "containers.sub"}}</p></div>
 </div>
-{{template "dockertabs" "containers"}}
 {{template "error" .}}
 {{if $d.Unreachable}}<p class="flash bad">{{t "containers.unreachable"}}</p>{{else}}
 <div class="tiles">

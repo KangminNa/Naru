@@ -1,41 +1,61 @@
 {{define "head"}}<!doctype html>
-<html lang="{{.Lang}}">
+<html lang="{{.Lang}}"{{with .Theme}} data-theme="{{.}}"{{end}}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{template "title" .}} · Naru</title>
+<title>{{template "title" .}} · {{t "brand"}}</title>
 <link rel="stylesheet" href="/static/naru.css?v={{.Version}}">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 {{if .Refresh}}<meta http-equiv="refresh" content="{{.Refresh}}">{{end}}
 </head>{{end}}
 
-{{define "logo"}}<span class="logo-mark"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span>{{end}}
+{{/* 이름표 — "나루"와 그 아래 물결 수위선 */}}
+{{define "wordmark"}}<span class="wordmark"><span class="wm-name">{{t "brand"}}</span><svg class="tide" viewBox="0 0 64 6" preserveAspectRatio="none" aria-hidden="true"><path d="M0 3 Q4 0 8 3 T16 3 T24 3 T32 3 T40 3 T48 3 T56 3 T64 3"/></svg></span>{{end}}
 
 {{define "lang"}}<div class="lang" role="group" aria-label="{{t "nav.language"}}">
   <a href="/lang/ko?back={{.Path}}" {{if eq .Lang "ko"}}aria-current="true"{{end}}>KO</a>
   <a href="/lang/en?back={{.Path}}" {{if eq .Lang "en"}}aria-current="true"{{end}}>EN</a>
 </div>{{end}}
 
-{{/* 로그인한 뒤의 화면 */}}
+{{define "theme"}}<div class="lang" role="group" aria-label="{{t "theme.label"}}">
+  <a href="/theme/auto?back={{.Path}}" {{if not .Theme}}aria-current="true"{{end}}>{{t "theme.auto"}}</a>
+  <a href="/theme/light?back={{.Path}}" {{if eq .Theme "light"}}aria-current="true"{{end}}>{{t "theme.light"}}</a>
+  <a href="/theme/dark?back={{.Path}}" {{if eq .Theme "dark"}}aria-current="true"{{end}}>{{t "theme.dark"}}</a>
+</div>{{end}}
+
+{{/* 로그인한 뒤의 화면 — 왼쪽 사이드바, 오른쪽 내용. 좁은 화면에서는 위 막대와 메뉴 단추 (자바스크립트 없이 체크박스로 연다) */}}
 {{define "app"}}{{template "head" .}}
-<body>
-<header class="top">
-  <div class="top-in">
-    <a class="logo" href="/">{{template "logo"}}<span class="word">Naru</span></a>
-    <nav class="menu">
-      <a href="/" {{if eq .Nav "home"}}aria-current="page"{{end}}>{{t "nav.services"}}</a>
-      <a href="/containers" {{if eq .Nav "containers"}}aria-current="page"{{end}}>{{t "nav.containers"}}</a>
-      <a href="/server" {{if eq .Nav "server"}}aria-current="page"{{end}}>{{t "nav.server"}}</a>
-      <a href="/settings" {{if eq .Nav "settings"}}aria-current="page"{{end}}>{{t "nav.settings"}}</a>
-    </nav>
-    <span class="spacer"></span>
-    {{template "lang" .}}
-    <form method="post" action="/logout"><button class="btn quiet small" type="submit">{{t "nav.logout"}}</button></form>
-  </div>
+<body class="shell">
+<input type="checkbox" id="nav-open" class="nav-open" aria-label="{{t "nav.menu"}}">
+<header class="mtop">
+  <a href="/" class="mtop-home">{{template "wordmark" .}}</a>
+  <label for="nav-open" class="mtop-menu" aria-label="{{t "nav.menu"}}"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></label>
 </header>
+<aside class="side" aria-label="{{t "nav.menu"}}">
+  <a href="/" class="side-home">{{template "wordmark" .}}</a>
+  <nav class="side-nav">
+    <a href="/" {{if eq .Nav "home"}}aria-current="page"{{end}}>{{template "icon-home"}}<span>{{t "nav.services"}}</span>{{if .Alerts}}<em class="alerts" aria-label="{{t "home.attention"}} {{.Alerts}}">{{.Alerts}}</em>{{end}}</a>
+    <span class="side-group">Docker</span>
+    <a href="/containers" {{if eq .Nav "containers"}}aria-current="page"{{end}}>{{template "icon-box"}}<span>{{t "nav.containers"}}</span></a>
+    <a href="/storage" {{if eq .Nav "storage"}}aria-current="page"{{end}}>{{template "icon-stack"}}<span>{{t "nav.storage"}}</span></a>
+    <a href="/networks" {{if eq .Nav "networks"}}aria-current="page"{{end}}>{{template "icon-network"}}<span>{{t "nav.networks"}}</span></a>
+    <span class="side-group">{{t "nav.group.server"}}</span>
+    <a href="/server" {{if eq .Nav "server"}}aria-current="page"{{end}}>{{template "icon-pulse"}}<span>{{t "nav.monitor"}}</span></a>
+    <a href="/settings" {{if eq .Nav "settings"}}aria-current="page"{{end}}>{{template "icon-gear"}}<span>{{t "nav.settings"}}</span></a>
+  </nav>
+  <div class="side-foot">
+    {{template "theme" .}}
+    {{template "lang" .}}
+    <div class="side-me">
+      <span class="me-name">{{with .User}}{{.Username}}{{end}}</span>
+      <form method="post" action="/logout"><button class="me-out" type="submit">{{t "nav.logout"}}</button></form>
+    </div>
+  </div>
+</aside>
+<label for="nav-open" class="side-scrim" aria-hidden="true"></label>
 <main class="page">
 {{if .OK}}<p class="flash ok" role="status">{{t .OK}}</p>{{end}}
-{{with .EnvFixes}}<p class="flash ok" role="status">{{t "env.fixed"}} {{range $i, $x := .}}{{if $i}} · {{end}}{{t (print "env.fix." $x.Kind) $x.Count}}{{end}}</p>{{end}}
+{{with .EnvFixes}}<p class="flash ok" role="status">{{t "env.fixed"}} {{range $i, $x := .}}{{if $i}}, {{end}}{{t (print "env.fix." $x.Kind) $x.Count}}{{end}}</p>{{end}}
 {{template "content" .}}
 </main>
 </body>
@@ -46,7 +66,7 @@
 <body class="center">
 <div class="card-wrap">
   <div class="card-top">
-    <span class="logo">{{template "logo"}}<span class="word">Naru</span></span>
+    {{template "wordmark" .}}
     <span class="spacer"></span>
     {{template "lang" .}}
   </div>
@@ -94,14 +114,11 @@
 {{define "icon-trash"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>{{end}}
 {{define "icon-download"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>{{end}}
 
-{{/* 컨테이너 · 이미지·볼륨 · 네트워크 탭 */}}
-{{define "dockertabs"}}<nav class="tabs" aria-label="Docker">
-  <a href="/containers" {{if eq . "containers"}}aria-current="page"{{end}}>{{template "icon-box"}}{{t "tabs.containers"}}</a>
-  <a href="/storage" {{if eq . "storage"}}aria-current="page"{{end}}>{{template "icon-stack"}}{{t "tabs.storage"}}</a>
-  <a href="/networks" {{if eq . "networks"}}aria-current="page"{{end}}>{{template "icon-network"}}{{t "tabs.networks"}}</a>
-</nav>{{end}}
 {{define "icon-box"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12v9M12 12 4 7.5"/></svg>{{end}}
 {{define "icon-network"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-2h12v2"/></svg>{{end}}
 {{define "icon-plus"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>{{end}}
 {{define "icon-git"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5H8.5"/></svg>{{end}}
 {{define "icon-link"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>{{end}}
+{{define "icon-home"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11 12 4l8 7M6 9.5V20h12V9.5"/></svg>{{end}}
+{{define "icon-pulse"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>{{end}}
+{{define "icon-gear"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>{{end}}

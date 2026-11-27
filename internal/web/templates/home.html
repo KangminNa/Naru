@@ -40,8 +40,8 @@
 <div class="panel">
   <div class="table-scroll">
   <table class="dt svc-dt">
-    <colgroup><col><col class="c-domain"><col class="c-state"><col class="c-usage"><col class="c-go"></colgroup>
-    <thead><tr><th>{{t "home.col.service"}}</th><th>{{t "home.col.domain"}}</th><th>{{t "containers.col.state"}}</th><th>{{t "containers.col.usage"}}</th><th></th></tr></thead>
+    <colgroup><col><col class="c-domain"><col class="c-state"><col class="c-usage"></colgroup>
+    <thead><tr><th>{{t "home.col.service"}}</th><th>{{t "home.col.domain"}}</th><th>{{t "containers.col.state"}}</th><th>{{t "containers.col.usage"}}</th></tr></thead>
     <tbody>
     {{range $d.Services}}
     <tr>
@@ -49,7 +49,6 @@
       <td class="link">{{if .Domain}}<span class="domain">{{.Domain}}</span>{{else}}<span class="muted small">{{t "home.noaddress"}}</span>{{end}}</td>
       <td><span class="badge {{if eq .StateClass "ok"}}ok{{else if eq .StateClass "bad"}}bad{{else if eq .StateClass "warn"}}warn{{else}}muted{{end}}">{{t .StateKey}}</span>{{with .Detail}}<span class="since">{{.}}</span>{{end}}</td>
       <td class="num">{{with .Usage}}{{cpu .CPUPercent}} <span class="muted">· {{bytes .MemUsed}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
-      <td class="go"><a class="btn tiny quiet" href="/services/{{.ID}}" aria-label="{{.Name}}">→</a></td>
     </tr>
     {{end}}
     </tbody>

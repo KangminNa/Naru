@@ -29,6 +29,7 @@ var staticFS embed.FS
 const (
 	sessionCookie = "naru_session"
 	langCookie    = "naru_lang"
+	themeCookie   = "naru_theme" // light · dark — 없으면 시스템 설정을 따른다
 	defaultLang   = "en"
 	sessionMaxAge = 7 * 24 * time.Hour
 )
@@ -52,6 +53,7 @@ type Deps struct {
 	Removal     contract.RemovalBoard   // 여러 컨테이너 지우기 — 확인 화면을 거쳐
 	Networks    contract.NetworkBoard   // 네트워크 화면, 컨테이너 상세의 붙이기·떼기
 	Monitor     contract.MonitorViewer
+	Watch       contract.HealthWatcher // 사이드바의 빨간 숫자 (없으면 숫자 없음)
 	Targets     contract.TargetEditor
 	Audit       contract.AuditLog // 관리자가 한 일을 남긴다 (없으면 남기지 않는다)
 	Deployer    contract.Deployer
@@ -103,6 +105,7 @@ func (s *Server) routes() {
 		w.Write([]byte(`{"ok":true}`))
 	})
 	s.mux.HandleFunc("GET /lang/{lang}", s.setLang)
+	s.mux.HandleFunc("GET /theme/{mode}", s.setTheme)
 
 	s.mux.HandleFunc("GET /setup", s.setupAccountPage)
 	s.mux.HandleFunc("POST /setup", s.setupAccount)
@@ -172,12 +175,22 @@ type view struct {
 	ErrLine                  int      // 여러 줄 칸에서 틀린 줄 (0이면 없음)
 	EnvFixes                 []envFix // 환경 변수를 .env 형식에서 고쳐 저장했다는 알림
 	Refresh                  int      // 0이 아니면 그 초마다 다시 그린다 (진행 중인 배포)
+	Theme                    string   // light · dark · "" (시스템 설정을 따른다) — 서버가 처음부터 정해 깜빡이지 않게
+	Alerts                   int      // 사이드바 "서비스" 옆 빨간 숫자 — 주의가 필요한 것
 	Data                     any
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page string, v view) {
 	v.Lang = langOf(r)
+	v.Theme = themeOf(r)
 	v.Path = r.URL.Path
+	if v.User != nil && s.d.Watch != nil {
+		for _, f := range s.d.Watch.Snapshot().Findings {
+			if f.Level != model.FindingHint {
+				v.Alerts++
+			}
+		}
+	}
 	v.Version = s.d.Version
 	var buf bytes.Buffer
 	if err := s.pages[v.Lang][page].ExecuteTemplate(&buf, "root", v); err != nil {
@@ -379,6 +392,25 @@ func (s *Server) setLang(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: langCookie, Value: lang, Path: "/", MaxAge: 365 * 24 * 3600, SameSite: http.SameSiteLaxMode, Secure: isHTTPS(r)})
 	}
 	redirect(w, r, safeBack(r.URL.Query().Get("back")))
+}
+
+// setTheme은 밝게·어둡게를 고른다. auto면 쿠키를 지워 시스템 설정을 따른다.
+func (s *Server) setTheme(w http.ResponseWriter, r *http.Request) {
+	switch mode := r.PathValue("mode"); mode {
+	case "light", "dark":
+		http.SetCookie(w, &http.Cookie{Name: themeCookie, Value: mode, Path: "/", MaxAge: 365 * 24 * 3600, SameSite: http.SameSiteLaxMode, Secure: isHTTPS(r)})
+	case "auto":
+		http.SetCookie(w, &http.Cookie{Name: themeCookie, Value: "", Path: "/", MaxAge: -1, SameSite: http.SameSiteLaxMode, Secure: isHTTPS(r)})
+	}
+	redirect(w, r, safeBack(r.URL.Query().Get("back")))
+}
+
+// themeOf는 고른 테마다 — light · dark, 아니면 "" (시스템 설정).
+func themeOf(r *http.Request) string {
+	if c, err := r.Cookie(themeCookie); err == nil && (c.Value == "light" || c.Value == "dark") {
+		return c.Value
+	}
+	return ""
 }
 
 // safeBack은 이 사이트 안의 경로만 돌려준다 — 다른 사이트로 튀는 리다이렉트를 막는다.

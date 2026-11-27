@@ -233,7 +233,7 @@ func (s *Server) storagePage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.d.Log.Warn("disk usage", "err", err)
 	}
-	s.render(w, r, http.StatusOK, "storage", view{Nav: "containers", User: &u, OK: okKeys[r.URL.Query().Get("ok")],
+	s.render(w, r, http.StatusOK, "storage", view{Nav: "storage", User: &u, OK: okKeys[r.URL.Query().Get("ok")],
 		Err: errKeys[r.URL.Query().Get("err")], Data: v})
 }
 
@@ -426,7 +426,7 @@ func (s *Server) renderNetworks(w http.ResponseWriter, r *http.Request, u model.
 	if errKey == "" {
 		errKey = errKeys[r.URL.Query().Get("err")]
 	}
-	s.render(w, r, status, "networks", view{Nav: "containers", User: &u, OK: okKeys[r.URL.Query().Get("ok")], Err: errKey, Data: d})
+	s.render(w, r, status, "networks", view{Nav: "networks", User: &u, OK: okKeys[r.URL.Query().Get("ok")], Err: errKey, Data: d})
 }
 
 func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {

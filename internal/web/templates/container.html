@@ -3,60 +3,69 @@
 {{define "content"}}
 {{$v := .Data}}{{$r := .Data.Row}}
 <a class="back" href="/containers{{with $v.Project}}#p-{{.}}{{end}}">← {{t "containers.title"}}</a>
-<div class="detail-head">
-  <div><h1 class="mono">{{$r.Name}}</h1>
-    <div class="sub"><span class="{{if eq $r.Health "unhealthy"}}bad-text{{else if $r.Running}}ok-text{{else}}muted{{end}}">{{if $r.Ended}}{{t "containers.ended"}}{{else}}{{$r.Status}}{{end}}</span>{{with $v.Project}} · {{t "containers.inproject" .}}{{end}}</div></div>
+<div class="c-head">
+  <span class="c-icon">{{template "icon-stack"}}</span>
+  <div class="c-title">
+    <h1>{{$r.Name}}</h1>
+    <div class="sub">{{template "cstate" $r}}{{with $v.Project}}<span class="muted">· {{t "containers.inproject" .}}</span>{{end}}</div>
+  </div>
   {{if not $r.Locked}}<div class="head-actions">
-    <form method="post" action="/containers/{{$r.Name}}/restart"><button class="btn" type="submit">{{t "containers.restart"}}</button></form>
-    {{if $r.Running}}<form method="post" action="/containers/{{$r.Name}}/stop"><button class="btn" type="submit">{{t "containers.stop"}}</button></form>
-    {{else}}<form method="post" action="/containers/{{$r.Name}}/start"><button class="btn" type="submit">{{t "containers.start"}}</button></form>{{end}}
-    {{if $r.Running}}{{if not $r.Linked}}<a class="btn" href="/services/new?kind=external&amp;upstream={{$r.Upstream}}">{{t "others.attach"}}</a>{{end}}
-    <a class="btn" href="/services/new?kind=repo&amp;adopt={{$r.Name}}">{{t "others.adopt"}}</a>{{end}}
+    <form method="post" action="/containers/{{$r.Name}}/restart"><button class="btn small" type="submit">{{template "icon-restart"}}{{t "containers.restart"}}</button></form>
+    {{if $r.Running}}<form method="post" action="/containers/{{$r.Name}}/stop"><button class="btn small" type="submit">{{template "icon-stop"}}{{t "containers.stop"}}</button></form>
+    {{else}}<form method="post" action="/containers/{{$r.Name}}/start"><button class="btn small" type="submit">{{template "icon-play"}}{{t "containers.start"}}</button></form>{{end}}
+    {{if $r.Running}}{{if not $r.Linked}}<a class="btn small" href="/services/new?kind=external&amp;upstream={{$r.Upstream}}">{{t "others.attach"}}</a>{{end}}
+    <a class="btn small" href="/services/new?kind=repo&amp;adopt={{$r.Name}}">{{t "others.adopt"}}</a>{{end}}
   </div>{{end}}
 </div>
 {{template "error" .}}
-{{if $r.Locked}}<p class="flash warn">{{if $r.Service}}{{t "containers.locked.service"}} <a href="/services/{{$r.Service}}">{{t "containers.ofservice" $r.ServiceName}} →</a>{{else}}{{t (print "containers.locked." $r.Locked)}}{{end}}</p>{{end}}
+{{if $r.Locked}}<p class="flash warn">{{if $r.Service}}{{t "containers.locked.service"}} <a class="tag-link" href="/services/{{$r.Service}}">{{t "containers.ofservice" $r.ServiceName}} →</a>{{else}}{{t (print "containers.locked." $r.Locked)}}{{end}}</p>{{end}}
 
 <div class="tiles">
   <div class="tile"><span>CPU</span><b>{{with $r.Usage}}{{cpu .CPUPercent}}{{else}}—{{end}}</b></div>
   <div class="tile"><span>{{t "home.memory"}}</span><b>{{with $r.Usage}}{{bytes .MemUsed}}{{else}}—{{end}}</b></div>
-  <div class="tile"><span>{{t "containers.restarts"}}</span><b>{{$v.Restarts}}</b></div>
-  <div class="tile"><span>{{t "containers.started"}}</span><b>{{if $r.Running}}{{if not $v.Started.IsZero}}{{ago $v.Started}}{{else}}—{{end}}{{else}}—{{end}}</b></div>
+  <div class="tile{{if $v.Restarts}} warn{{end}}"><span>{{t "containers.restarts"}}</span><b>{{$v.Restarts}}</b></div>
+  <div class="tile"><span>{{t "containers.started"}}</span><b>{{if and $r.Running (not $v.Started.IsZero)}}{{ago $v.Started}}{{else}}—{{end}}</b></div>
 </div>
 
-<section class="section">
-  <dl class="facts">
-    <dt>{{t "containers.image"}}</dt><dd class="mono">{{$r.Image}}</dd>
-    <dt>{{t "containers.ports"}}</dt><dd class="mono">{{range $i, $p := $r.Ports}}{{if $i}} {{end}}{{$p}}{{else}}—{{end}}{{with $r.Exposed}} <span class="muted">({{t "containers.exposed"}} {{range $i, $p := .}}{{if $i}} {{end}}{{$p}}{{end}})</span>{{end}}</dd>
-    <dt>{{t "containers.networks"}}</dt><dd class="mono">{{range $i, $n := $r.Networks}}{{if $i}}, {{end}}{{$n}}{{else}}<span class="muted">{{t "containers.nonetwork"}}</span>{{end}}</dd>
-    <dt>{{t "containers.mounts"}}</dt><dd class="mono">{{range $v.Mounts}}<div>{{.}}</div>{{else}}—{{end}}</dd>
-    <dt>{{t "containers.env"}}</dt><dd><span class="mono">{{range $i, $n := $v.EnvNames}}{{if $i}} · {{end}}{{$n}}{{else}}—{{end}}</span> <span class="muted small">{{t "containers.env.note"}}</span></dd>
-    {{if $r.Domains}}<dt>{{t "containers.domains"}}</dt><dd class="mono">{{range $i, $d := $r.Domains}}{{if $i}}, {{end}}{{$d}}{{end}}</dd>{{end}}
-    {{if $r.Health}}<dt>{{t "containers.health"}}</dt><dd><span class="{{if eq $r.Health "unhealthy"}}bad-text{{else if eq $r.Health "healthy"}}ok-text{{end}}">{{$r.Health}}</span>{{with $v.HealthLog}}<pre class="code">{{.}}</pre>{{end}}</dd>{{end}}
-  </dl>
-</section>
+<div class="grid-2">
+  <section class="panel">
+    <div class="panel-h"><h2>{{t "containers.details"}}</h2></div>
+    <div class="panel-b">
+      <dl class="kv">
+        <dt>{{t "containers.image"}}</dt><dd class="mono">{{$r.ImageLabel}}</dd>
+        <dt>{{t "containers.ports"}}</dt><dd class="mono">{{range $i, $p := $r.Ports}}{{if $i}} {{end}}{{$p}}{{else}}—{{end}}{{with $r.Exposed}} <span class="muted">· {{t "containers.exposed"}} {{range $i, $p := .}}{{if $i}} {{end}}{{$p}}{{end}}</span>{{end}}</dd>
+        <dt>{{t "containers.networks"}}</dt><dd class="mono">{{range $i, $n := $r.Networks}}{{if $i}}, {{end}}{{$n}}{{else}}<span class="muted">{{t "containers.nonetwork"}}</span>{{end}}</dd>
+        <dt>{{t "containers.mounts"}}</dt><dd class="mono">{{range $v.Mounts}}<div>{{.}}</div>{{else}}—{{end}}</dd>
+        {{if $r.Domains}}<dt>{{t "containers.domains"}}</dt><dd>{{range $r.Domains}}<div class="mono">{{.}}</div>{{end}}</dd>{{end}}
+        {{if $r.Health}}<dt>{{t "containers.health"}}</dt><dd>{{template "cstate" $r}}{{with $v.HealthLog}}<pre class="code">{{.}}</pre>{{end}}</dd>{{end}}
+      </dl>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-h"><h2>{{t "containers.env"}}</h2><span class="muted small">{{t "containers.env.note"}}</span></div>
+    <div class="panel-b"><div class="env-names">{{range $v.EnvNames}}<code>{{.}}</code>{{else}}<span class="muted">—</span>{{end}}</div></div>
+  </section>
+</div>
 
-<section class="section">
-  <div class="ctr-group-head"><h2>{{t "containers.logs"}}</h2>
-    <div class="head-actions">
-      <a class="btn small" href="/containers/{{$r.Name}}/logs.txt?q={{$v.Query}}">{{t "logs.download"}}</a>
-      <a class="btn small" href="/containers/{{$r.Name}}?q={{$v.Query}}">{{t "logs.refresh"}}</a>
-    </div></div>
+<section class="panel gap-top">
+  <div class="panel-h"><h2>{{t "containers.logs"}}</h2><span class="spacer"></span>
+    <a class="btn tiny" href="/containers/{{$r.Name}}?q={{$v.Query}}">{{template "icon-restart"}}{{t "logs.refresh"}}</a>
+    <a class="btn tiny" href="/containers/{{$r.Name}}/logs.txt?q={{$v.Query}}">{{template "icon-download"}}{{t "logs.download"}}</a></div>
   <form class="logs-find" method="get" action="/containers/{{$r.Name}}">
     <input class="input" name="q" value="{{$v.Query}}" placeholder="{{t "logs.find.placeholder"}}" aria-label="{{t "logs.find"}}">
-    <button class="btn" type="submit">{{t "logs.find"}}</button>
+    <button class="btn small" type="submit">{{t "logs.find"}}</button>
   </form>
   {{if $v.Logs}}<pre class="code log logs">{{range $v.Logs}}<span class="ts">{{clock .At}}</span> <span class="tag {{.Stream}}">{{t "logs.out"}}</span> {{.Text}}
-{{end}}</pre>{{else}}<p class="desc">{{if $v.Query}}{{t "logs.nomatch" $v.Query}}{{else}}{{t "logs.empty"}}{{end}}</p>{{end}}
+{{end}}</pre>{{else}}<p class="panel-b muted">{{if $v.Query}}{{t "logs.nomatch" $v.Query}}{{else}}{{t "logs.empty"}}{{end}}</p>{{end}}
 </section>
 
 {{if and (not $r.Locked) (not $r.Running)}}
-<section class="section danger" id="remove">
+<section class="danger-zone" id="remove">
   <h2>{{t "containers.remove"}}</h2>
-  <p class="desc">{{t "containers.remove.desc"}}</p>
+  <p>{{t "containers.remove.desc"}}</p>
   <form method="post" action="/containers/{{$r.Name}}/remove" class="inline-form">
     <input class="input mono" name="confirm" placeholder="{{$r.Name}}" aria-label="{{t "containers.remove.confirm" $r.Name}}" autocomplete="off">
-    <button class="btn danger" type="submit">{{t "containers.remove.button"}}</button>
+    <button class="btn danger" type="submit">{{template "icon-trash"}}{{t "containers.remove.button"}}</button>
   </form>
   <small class="muted">{{t "containers.remove.confirm" $r.Name}}</small>
 </section>

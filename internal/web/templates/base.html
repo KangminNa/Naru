@@ -18,7 +18,7 @@
 
 {{/* 로그인한 뒤의 화면 */}}
 {{define "app"}}{{template "head" .}}
-<body>
+<body{{if eq .Nav "containers"}} class="wide"{{end}}>
 <header class="top">
   <div class="top-in">
     <a class="logo" href="/">{{template "logo"}}<span class="word">Naru</span></a>
@@ -76,3 +76,20 @@
   <li {{if eq .Data.Step 2}}aria-current="step"{{end}} {{if gt .Data.Step 2}}class="done"{{end}}><b>2</b>{{t "setup.step.domain"}}</li>
   <li {{if eq .Data.Step 3}}aria-current="step"{{end}}><b>3</b>{{t "setup.step.https"}}</li>
 </ol>{{end}}
+
+
+{{/* 컨테이너 상태 배지 — 목록과 상세가 함께 쓴다 */}}
+{{define "cstate"}}{{if .Ended}}<span class="badge muted">{{t "containers.ended"}}</span>
+{{else if eq .State "running"}}{{if eq .Health "unhealthy"}}<span class="badge warn" title="{{.Status}}">unhealthy</span>{{else if eq .Health "starting"}}<span class="badge info" title="{{.Status}}">starting</span>{{else}}<span class="badge ok" title="{{.Status}}">{{if eq .Health "healthy"}}healthy{{else}}running{{end}}</span>{{end}}<span class="since">{{.Status}}</span>
+{{else if eq .State "restarting"}}<span class="badge bad">restarting</span><span class="since">{{.Status}}</span>
+{{else}}<span class="badge bad">{{.State}}</span><span class="since">{{.Status}}</span>{{end}}{{end}}
+
+{{/* 작은 아이콘 (선만, 글자색을 따른다) */}}
+{{define "icon-restart"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>{{end}}
+{{define "icon-stop"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>{{end}}
+{{define "icon-play"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>{{end}}
+{{define "icon-lock"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>{{end}}
+{{define "icon-search"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>{{end}}
+{{define "icon-stack"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5zM3 13l9 5 9-5"/></svg>{{end}}
+{{define "icon-trash"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>{{end}}
+{{define "icon-download"}}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>{{end}}

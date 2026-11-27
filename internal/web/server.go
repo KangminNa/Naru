@@ -116,6 +116,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", s.home)
 	s.mux.HandleFunc("GET /server", s.serverPage)
 	s.mux.HandleFunc("GET /containers", s.containersPage)
+	s.mux.HandleFunc("POST /containers", s.containersSelected)
 	s.mux.HandleFunc("GET /containers/{name}", s.containerPage)
 	s.mux.HandleFunc("GET /containers/{name}/logs.txt", s.containerLogsText)
 	s.mux.HandleFunc("POST /containers/{name}/{action}", s.containerAction)

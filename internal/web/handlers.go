@@ -277,6 +277,7 @@ var okKeys = map[string]string{
 	"restart": "ok.container.restart", "stop": "ok.container.stop", "start": "ok.container.start", "removed": "ok.container.removed",
 	"project-restart": "ok.project.restart", "project-stop": "ok.project.stop", "project-start": "ok.project.start",
 	"image-removed": "ok.image.removed", "volume-removed": "ok.volume.removed",
+	"selected-restart": "ok.selected.restart", "selected-stop": "ok.selected.stop", "selected-start": "ok.selected.start",
 }
 
 // ── 설정 ───────────────────────────────────

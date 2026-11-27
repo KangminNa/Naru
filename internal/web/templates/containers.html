@@ -1,33 +1,70 @@
 {{define "root"}}{{template "app" .}}{{end}}
 {{define "title"}}{{t "containers.title"}}{{end}}
-{{define "content"}}
-<div class="hero"><div><h1>{{t "containers.title"}}</h1><p>{{t "containers.sub"}}</p></div>
-  <div class="head-actions"><a class="btn" href="/storage">{{t "containers.storage"}}</a></div></div>
+{{define "content"}}{{$d := .Data}}
+<div class="page-head">
+  <div><h1>{{t "containers.title"}}</h1><p>{{t "containers.sub"}}</p></div>
+  <a class="btn" href="/storage">{{template "icon-stack"}}{{t "containers.storage"}}</a>
+</div>
 {{template "error" .}}
-{{if .Data.Unreachable}}<p class="flash bad">{{t "containers.unreachable"}}</p>{{end}}
-{{range .Data.Groups}}{{$g := .}}
-<section class="section ctr-group" id="p-{{.Project}}">
-  <div class="ctr-group-head">
-    <h2>{{if .Project}}{{.Project}} <span class="muted small">· {{t "containers.compose" (len .Rows) .Running}}</span>{{else}}{{t "containers.standalone"}}{{end}}</h2>
-    {{if .Project}}{{if .Locked}}<span class="muted small">{{t (print "containers.locked." .Locked)}}</span>{{else}}
-    <div class="ctr-actions">
-      <form method="post" action="/containers/projects/{{.Project}}/restart"><button class="btn small" type="submit">{{t "containers.project.restart"}}</button></form>
-      <form method="post" action="/containers/projects/{{.Project}}/stop"><button class="btn small" type="submit">{{t "containers.project.stop"}}</button></form>
-      <form method="post" action="/containers/projects/{{.Project}}/start"><button class="btn small" type="submit">{{t "containers.project.start"}}</button></form>
-    </div>{{end}}{{end}}
-  </div>
-  <div class="svc-table ctr-table">
-    {{range .Rows}}
-    <div class="svc-row ctr-row{{if not .Running}} off{{end}}">
-      <span><span class="dot {{if eq .Health "unhealthy"}}bad{{else if .Running}}ok{{else if .Ended}}muted{{else}}bad{{end}}"></span> <a class="mono" href="/containers/{{.Name}}">{{.Name}}</a></span>
-      <span class="{{if eq .Health "unhealthy"}}bad-text{{else if .Ended}}muted{{else if .Running}}ok-text{{else}}bad-text{{end}}">{{if .Ended}}{{t "containers.ended"}}{{else}}{{.Status}}{{end}}</span>
-      <span class="muted">{{with .Usage}}{{cpu .CPUPercent}} · {{bytes .MemUsed}}{{else}}—{{end}}</span>
-      <span class="muted mono">{{range $i, $p := .Ports}}{{if $i}} {{end}}{{$p}}{{else}}{{range $i, $p := .Exposed}}{{if $i}} {{end}}:{{$p}}{{end}}{{end}}</span>
-      <span class="small">{{if .Service}}<a href="/services/{{.Service}}">{{t "containers.ofservice" .ServiceName}}</a>{{else if .Linked}}<a href="/services/{{.Linked}}">{{t "others.linked" .LinkedName}}</a>{{else if eq .Locked "naru"}}<span class="muted">Naru</span>{{else if eq .Locked "webserver"}}<span class="muted">{{t "containers.webserver"}}</span>{{else if .Running}}<a href="/services/new?kind=external&amp;upstream={{.Upstream}}">{{t "others.attach"}}</a>{{if .OnlyBridge}} · <em class="warn">{{t "containers.bridge"}}</em>{{end}}{{end}}{{range .Domains}} · <span class="mono">{{.}}</span>{{end}}</span>
+{{if $d.Unreachable}}<p class="flash bad">{{t "containers.unreachable"}}</p>{{else}}
+<div class="tiles">
+  <a class="tile" href="/containers?state=running"><span>{{t "containers.tile.running"}}</span><b>{{$d.Running}}<small> / {{$d.Total}}</small></b></a>
+  <a class="tile{{if $d.Stopped}} bad{{end}}" href="/containers?state=stopped"><span>{{t "containers.tile.stopped"}}</span><b>{{$d.Stopped}}</b></a>
+  <a class="tile{{if $d.Sick}} warn{{end}}" href="/containers?state=problem"><span>{{t "containers.tile.sick"}}</span><b>{{$d.Sick}}</b></a>
+  <div class="tile"><span>{{t "containers.tile.usage"}}</span><b>{{cpu $d.CPU}}<small> · {{bytes $d.Mem}}</small></b></div>
+</div>
+
+<form class="panel" method="post" action="/containers">
+  <input type="hidden" name="back" value="?state={{$d.State}}&amp;q={{$d.Query}}">
+  <div class="toolbar">
+    <div class="search">{{template "icon-search"}}<input class="input" form="find" name="q" value="{{$d.Query}}" placeholder="{{t "containers.find"}}" aria-label="{{t "containers.find"}}"></div>
+    <nav class="chips" aria-label="{{t "containers.col.state"}}">
+      <a class="chip{{if eq $d.State ""}} on{{end}}" href="/containers?q={{$d.Query}}">{{t "containers.filter.all"}} <b>{{$d.Total}}</b></a>
+      <a class="chip{{if eq $d.State "running"}} on{{end}}" href="/containers?state=running&amp;q={{$d.Query}}">{{t "containers.filter.running"}} <b>{{$d.Running}}</b></a>
+      <a class="chip{{if eq $d.State "stopped"}} on{{end}}" href="/containers?state=stopped&amp;q={{$d.Query}}">{{t "containers.filter.stopped"}} <b>{{$d.Stopped}}</b></a>
+      <a class="chip{{if eq $d.State "problem"}} on{{end}}" href="/containers?state=problem&amp;q={{$d.Query}}">{{t "containers.filter.problem"}} <b>{{$d.Sick}}</b></a>
+    </nav>
+    <span class="spacer"></span>
+    <div class="bulk">
+      <span class="muted small">{{t "containers.selected"}}</span>
+      <button class="btn small" type="submit" name="action" value="restart">{{template "icon-restart"}}{{t "containers.restart"}}</button>
+      <button class="btn small" type="submit" name="action" value="stop">{{template "icon-stop"}}{{t "containers.stop"}}</button>
+      <button class="btn small" type="submit" name="action" value="start">{{template "icon-play"}}{{t "containers.start"}}</button>
     </div>
-    {{end}}
   </div>
-</section>
-{{else}}{{if not .Data.Unreachable}}<p class="desc">{{t "containers.empty"}}</p>{{end}}{{end}}
-<p class="others-note">{{t "containers.note"}}</p>
+  <div class="table-scroll">
+  <table class="dt">
+    <colgroup><col class="c-check"><col><col class="c-state"><col class="c-usage"><col class="c-ports"><col class="c-link"></colgroup>
+    <thead><tr><th></th><th>{{t "containers.col.name"}}</th><th>{{t "containers.col.state"}}</th><th>{{t "containers.col.usage"}}</th><th>{{t "containers.col.ports"}}</th><th>{{t "containers.col.link"}}</th></tr></thead>
+    {{range $d.Groups}}{{$g := .}}
+    <tbody id="p-{{.Project}}">
+      <tr class="grp"><td colspan="6">
+        <div class="grp-in">
+          <span class="grp-name">{{if .Project}}{{template "icon-stack"}}<b>{{.Project}}</b> <span class="muted">{{t "containers.compose" (len .Rows) .Running}}</span>{{else}}<b>{{t "containers.standalone"}}</b>{{end}}</span>
+          {{if .Project}}{{if .Locked}}<span class="muted small">{{template "icon-lock"}}{{t (print "containers.locked." .Locked)}}</span>{{else}}
+          <span class="grp-actions">
+            <button class="btn tiny" type="submit" formaction="/containers/projects/{{.Project}}/restart" title="{{t "containers.project.restart"}}">{{template "icon-restart"}}{{t "containers.project.restart"}}</button>
+            <button class="btn tiny" type="submit" formaction="/containers/projects/{{.Project}}/stop">{{template "icon-stop"}}{{t "containers.project.stop"}}</button>
+            <button class="btn tiny" type="submit" formaction="/containers/projects/{{.Project}}/start">{{template "icon-play"}}{{t "containers.project.start"}}</button>
+          </span>{{end}}{{end}}
+        </div>
+      </td></tr>
+      {{range .Rows}}
+      <tr class="{{if not .Running}}off{{end}}">
+        <td class="c-check">{{if .Locked}}<span class="lock" title="{{t "containers.locked.short"}}">{{template "icon-lock"}}</span>{{else if not .Ended}}<input type="checkbox" name="c" value="{{.Name}}" aria-label="{{.Name}}">{{end}}</td>
+        <td class="name"><a href="/containers/{{.Name}}">{{.Name}}</a><span class="img">{{.ImageLabel}}</span></td>
+        <td>{{template "cstate" .}}</td>
+        <td class="num">{{with .Usage}}{{cpu .CPUPercent}} <span class="muted">· {{bytes .MemUsed}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="mono small">{{range $i, $p := .Ports}}{{if $i}} {{end}}{{$p}}{{else}}{{range $i, $p := .Exposed}}{{if $i}} {{end}}<span class="muted">:{{$p}}</span>{{else}}<span class="muted">—</span>{{end}}{{end}}</td>
+        <td class="link">{{if .Service}}<a class="tag-link" href="/services/{{.Service}}">{{t "containers.ofservice" .ServiceName}}</a>{{else if .Linked}}<a class="tag-link" href="/services/{{.Linked}}">{{t "containers.ofservice" .LinkedName}}</a>{{else if eq .Locked "naru"}}<span class="muted">Naru</span>{{else if eq .Locked "webserver"}}<span class="muted">{{t "containers.webserver"}}</span>{{else if .Running}}<a class="add-link" href="/services/new?kind=external&amp;upstream={{.Upstream}}">+ {{t "others.attach"}}</a>{{end}}{{range .Domains}}<span class="domain">{{.}}</span>{{end}}{{if .OnlyBridge}}<span class="warn-text small">{{t "containers.bridge"}}</span>{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+    {{else}}<tbody><tr><td colspan="6" class="empty-row">{{if or $d.Query $d.State}}{{t "containers.nomatch"}}{{else}}{{t "containers.empty"}}{{end}}</td></tr></tbody>{{end}}
+  </table>
+  </div>
+</form>
+<form id="find" method="get" action="/containers"><input type="hidden" name="state" value="{{$d.State}}"></form>
+<p class="foot-note">{{t "containers.note"}} {{t "containers.refresh"}}</p>
+{{end}}
 {{end}}

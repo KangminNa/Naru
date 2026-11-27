@@ -52,6 +52,14 @@ type ContainerRow struct {
 	Locked                     string   // 동작을 막는 이유 (Locked…) — 비면 동작할 수 있다
 }
 
+// ImageLabel은 화면에 보일 이미지 이름이다 — 이름 없이 ID만 있으면 앞 12자.
+func (r ContainerRow) ImageLabel() string {
+	if strings.HasPrefix(r.Image, "sha256:") {
+		return ShortImageID(ImageID(r.Image))
+	}
+	return r.Image
+}
+
 // Running은 돌고 있는가.
 func (r ContainerRow) Running() bool { return r.State == "running" }
 

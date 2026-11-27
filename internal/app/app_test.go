@@ -1499,7 +1499,7 @@ func TestHomeSumsUpAndTheContainersPageListsEverything(t *testing.T) {
 	// 붙이고 나면 버튼 대신 어느 서비스가 보내는지
 	h.post("/services/new", url.Values{"kind": {"external"}, "upstream": {"cairn-web-1:3000"}, "name": {"cairn"}})
 	_, _, page = h.get("/containers")
-	if !strings.Contains(page, "cairn 서비스가 여기로 보내요") || strings.Contains(page, "upstream=cairn-web-1%3a3000") {
+	if !strings.Contains(page, `<a class="tag-link" href="/services/2">cairn 서비스</a>`) || strings.Contains(page, "upstream=cairn-web-1%3a3000") {
 		t.Fatal("a linked container shows its service instead of the button")
 	}
 	// [주소 붙이기]는 외부 연결 화면을 채워서 연다
@@ -1573,9 +1573,40 @@ func TestContainerActionsAndTheirGuards(t *testing.T) {
 		t.Fatalf("only the stopped worker starts — the finished migration is not rerun: %s", acts)
 	}
 
+	// 고른 것들에 한 번에 — 보호된 것이 섞이면 그것만 막히고 알린다
+	h.docker.mu.Lock()
+	h.docker.acts = nil
+	h.docker.mu.Unlock()
+	if _, loc, _ := h.post("/containers", url.Values{"action": {"restart"}, "c": {"cairn-web-1", "naru-caddy"}, "back": {"?state=running"}}); !strings.Contains(loc, "/containers?state=running&err=protected") {
+		t.Fatalf("%s", loc)
+	}
+	if _, loc, _ := h.post("/containers", url.Values{"action": {"stop"}, "c": {"cairn-web-1"}}); loc != "/containers?ok=selected-stop" {
+		t.Fatalf("%s", loc)
+	}
+	if _, loc, _ := h.post("/containers", url.Values{"action": {"remove"}, "c": {"cairn-worker-1"}}); !strings.Contains(loc, "err=action") {
+		t.Fatalf("removing is one at a time, on the detail page: %s", loc)
+	}
+	if _, loc, _ := h.post("/containers", url.Values{"action": {"start"}, "back": {"//evil.example"}}); loc != "/containers?err=none" {
+		t.Fatalf("nothing selected, and back stays on this page: %s", loc)
+	}
+	h.docker.mu.Lock()
+	acts = strings.Join(h.docker.acts, ",")
+	h.docker.mu.Unlock()
+	if acts != "restart cairn-web-1,stop cairn-web-1" {
+		t.Fatalf("%s", acts)
+	}
+	// 찾기 · 거르기
+	_, _, list := h.get("/containers?state=stopped")
+	if !strings.Contains(list, "cairn-web-1") || strings.Contains(list, `href="/containers/naru-caddy"`) {
+		t.Fatal("stopped only (cairn-web-1 was just stopped)")
+	}
+	if _, _, list := h.get("/containers?q=migrate"); !strings.Contains(list, "cairn-migrate-1") || strings.Contains(list, `href="/containers/cairn-web-1"`) {
+		t.Fatal("search by name")
+	}
+
 	// 관리 기록
 	_, _, settings := h.get("/settings")
-	for _, want := range []string{"cairn-web-1 컨테이너를 다시 시작했어요", "old-api 컨테이너를 지웠어요", "cairn 묶음을 켰어요"} {
+	for _, want := range []string{"cairn-web-1 컨테이너를 다시 시작했어요", "old-api 컨테이너를 지웠어요", "cairn 묶음을 켰어요", "cairn-web-1 컨테이너를 멈췄어요"} {
 		if !strings.Contains(settings, want) {
 			t.Errorf("the activity log is missing %q", want)
 		}
@@ -1586,7 +1617,7 @@ func TestStoragePageDeletesOneAtATime(t *testing.T) {
 	h := newHarness(t, "")
 	h.signedIn()
 	_, _, page := h.get("/storage")
-	for _, want := range []string{"old/app:1", "0123456789ab", "안 씀", "컨테이너 1개가 씀", "shop_dbdata", "left_over", "안 쓰는 이미지 890.0 MB"} {
+	for _, want := range []string{"old/app:1", "0123456789ab", "안 씀", "컨테이너 1개가 씀", "shop_dbdata", "left_over", "안 쓰는 이미지", "890.0 MB"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the storage page is missing %q", want)
 		}

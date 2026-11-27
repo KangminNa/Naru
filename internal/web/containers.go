@@ -15,28 +15,123 @@ import (
 // ── 컨테이너 화면 — 이 서버의 모든 컨테이너 ─────────────
 
 type containersScreen struct {
-	Groups      []model.ContainerGroup
-	Count       int
-	Unreachable bool // Docker를 읽지 못했다
+	Groups      []model.ContainerGroup // 찾기·거르기를 거친 것
+	Total       int
+	Running     int
+	Stopped     int // 멈춘 것 (한 번 돌고 잘 끝난 것은 빼고)
+	Sick        int // 상태 검사 실패
+	CPU         float64
+	Mem         uint64
+	Shown       int
+	Query       string
+	State       string // "" · running · stopped · problem
+	Unreachable bool   // Docker를 읽지 못했다
 }
+
+// containerStates는 거르기 칩이다 — 쿼리에서 받는 값은 이것뿐.
+var containerStates = map[string]bool{"": true, "running": true, "stopped": true, "problem": true}
 
 func (s *Server) containersPage(w http.ResponseWriter, r *http.Request) {
 	u, _, ok := s.gate(w, r)
 	if !ok {
 		return
 	}
-	d := containersScreen{}
+	q := r.URL.Query()
+	d := containersScreen{Query: strings.TrimSpace(q.Get("q")), State: q.Get("state")}
+	if !containerStates[d.State] {
+		d.State = ""
+	}
 	groups, err := s.d.Containers.List(r.Context())
 	if err != nil {
 		s.d.Log.Warn("containers", "err", err)
 		d.Unreachable = true
 	}
-	d.Groups = groups
+	needle := strings.ToLower(d.Query)
 	for _, g := range groups {
-		d.Count += len(g.Rows)
+		kept := g
+		kept.Rows = nil
+		for _, c := range g.Rows {
+			d.Total++
+			stopped := !c.Running() && !c.Ended
+			sick := c.Health == "unhealthy" || c.State == "restarting"
+			switch {
+			case c.Running():
+				d.Running++
+			case stopped:
+				d.Stopped++
+			}
+			if sick {
+				d.Sick++
+			}
+			if c.Usage != nil {
+				d.CPU += c.Usage.CPUPercent
+				d.Mem += c.Usage.MemUsed
+			}
+			match := needle == "" || strings.Contains(strings.ToLower(c.Name), needle) || strings.Contains(strings.ToLower(c.Image), needle) ||
+				strings.Contains(strings.ToLower(g.Project), needle)
+			switch d.State {
+			case "running":
+				match = match && c.Running()
+			case "stopped":
+				match = match && stopped
+			case "problem":
+				match = match && (sick || stopped)
+			}
+			if match {
+				kept.Rows = append(kept.Rows, c)
+			}
+		}
+		if len(kept.Rows) > 0 {
+			d.Shown += len(kept.Rows)
+			d.Groups = append(d.Groups, kept)
+		}
 	}
 	s.render(w, r, http.StatusOK, "containers", view{Nav: "containers", User: &u, OK: okKeys[r.URL.Query().Get("ok")],
 		Err: errKeys[r.URL.Query().Get("err")], Data: d})
+}
+
+// containersSelected는 목록에서 고른 컨테이너들에 한 가지 동작을 한다 (다시 시작·멈추기·켜기 — 지우기는 하나씩 상세에서).
+// 보호된 것은 건너뛴다 — 하나라도 막히거나 실패하면 그렇게 알린다.
+func (s *Server) containersSelected(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.gate(w, r); !ok {
+		return
+	}
+	back := "/containers"
+	if ret := r.FormValue("back"); strings.HasPrefix(ret, "?") && !strings.ContainsAny(ret, "\r\n") {
+		back += ret
+	}
+	join := func(k, v string) string {
+		if strings.Contains(back, "?") {
+			return back + "&" + k + "=" + v
+		}
+		return back + "?" + k + "=" + v
+	}
+	a, err := model.ParseContainerAction(r.FormValue("action"))
+	names := r.Form["c"]
+	if err != nil || a == model.ActRemove {
+		redirect(w, r, join("err", "action"))
+		return
+	}
+	if len(names) == 0 {
+		redirect(w, r, join("err", "none"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+	var failed error
+	for _, n := range names {
+		if err := s.d.Containers.Act(ctx, n, a); err != nil {
+			s.d.Log.Warn("container action", "container", n, "action", a, "err", err)
+			if failed == nil || errors.Is(err, model.ErrProtected) {
+				failed = err
+			}
+		}
+	}
+	if failed != nil {
+		redirect(w, r, join("err", errCode(failed)))
+		return
+	}
+	redirect(w, r, join("ok", "selected-"+string(a)))
 }
 
 func (s *Server) containerPage(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +289,7 @@ func errCode(err error) string {
 var errKeys = map[string]string{
 	"rollback":  "err.rollback",
 	"protected": "err.protected", "running": "err.running", "inuse": "err.inuse", "gone": "err.gone",
-	"action": "err.action", "docker": "err.docker", "confirm": "err.confirmname",
+	"action": "err.action", "docker": "err.docker", "confirm": "err.confirmname", "none": "err.noneselected",
 }
 
 // auditTarget은 컨테이너·묶음·이미지·볼륨 동작의 대상이다 — 경로에서 꺼낸다.

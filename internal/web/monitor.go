@@ -178,6 +178,7 @@ var auditActions = map[string]string{
 	"POST /settings/alerts/{cid}/delete":           "settings.alert.remove",
 	"POST /containers/{name}/{action}":             "container.*", // * = 경로의 동작 (restart·stop·start·remove)
 	"POST /containers/projects/{project}/{action}": "project.*",
+	"POST /containers":                             "container.selected.*", // * = 폼의 동작, 대상 = 고른 이름들
 	"POST /storage/images/{id}/delete":             "image.remove",
 	"POST /storage/volumes/{name}/delete":          "volume.remove",
 }
@@ -218,8 +219,19 @@ func (s *Server) audited(next http.Handler) http.Handler {
 		if !signedIn || rec.code < 300 || rec.code >= 400 || sentAway {
 			return
 		}
+		target := auditTarget(r.URL.Path)
+		if action == "container.selected.*" {
+			target = strings.Join(r.Form["c"], ", ")
+			if len(target) > 200 {
+				target = target[:200] + "…"
+			}
+		}
 		if prefix, ok := strings.CutSuffix(action, ".*"); ok {
-			a, err := model.ParseContainerAction(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])
+			last := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			if prefix == "container.selected" {
+				last = r.FormValue("action")
+			}
+			a, err := model.ParseContainerAction(last)
 			if err != nil {
 				return
 			}
@@ -227,7 +239,7 @@ func (s *Server) audited(next http.Handler) http.Handler {
 		}
 		failed := strings.Contains(rec.location, "?err=") || strings.Contains(rec.location, "&err=") // 되돌려 보내며 실패를 알렸다
 		e := model.AuditEntry{At: s.d.Clock.Now(), Who: u.Username.String(), IP: clientIP(r), Action: action, OK: !failed,
-			Service: serviceIn(r.URL.Path), Target: auditTarget(r.URL.Path)}
+			Service: serviceIn(r.URL.Path), Target: target}
 		if e.Service == 0 {
 			e.Service = serviceIn(rec.location) // 만들기 — 새 번호는 보낸 곳에 있다
 		}

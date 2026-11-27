@@ -3,44 +3,55 @@
 {{define "content"}}
 {{$v := .Data}}
 <a class="back" href="/containers">← {{t "containers.title"}}</a>
-<div class="hero"><div><h1>{{t "storage.title"}}</h1><p>{{t "storage.sub"}}</p></div></div>
+<div class="page-head"><div><h1>{{t "storage.title"}}</h1><p>{{t "storage.sub"}}</p></div></div>
 {{template "error" .}}
 {{if not $v.DockerReadable}}<p class="flash bad">{{t "containers.unreachable"}}</p>{{else}}
-<p class="desc">{{t "storage.unused" (bytes $v.UnusedImages) (bytes $v.UnusedVolumes)}}</p>
+<div class="tiles">
+  <div class="tile"><span>{{t "storage.images"}}</span><b>{{len $v.Disk.Images}}</b></div>
+  <div class="tile{{if $v.UnusedImages}} warn{{end}}"><span>{{t "storage.unused.images"}}</span><b>{{bytes $v.UnusedImages}}</b></div>
+  <div class="tile"><span>{{t "storage.volumes"}}</span><b>{{len $v.Disk.Volumes}}</b></div>
+  <div class="tile{{if $v.UnusedVolumes}} warn{{end}}"><span>{{t "storage.unused.volumes"}}</span><b>{{bytes $v.UnusedVolumes}}</b></div>
+</div>
 
-<section class="section" id="images">
-  <h2>{{t "storage.images"}} <span class="count">{{len $v.Disk.Images}}</span></h2>
-  <div class="svc-table store-table">
-    {{range $v.Disk.Images}}
-    <div class="svc-row store-row">
-      <span><span class="mono">{{range $i, $t := .Tags}}{{if $i}}, {{end}}{{$t}}{{else}}<span class="muted">{{t "storage.untagged"}}</span>{{end}}</span><br><small class="muted mono">{{.Short}}</small></span>
-      <span>{{bytes .Size}}</span>
-      <span class="muted">{{ago .Created}}</span>
-      <span>{{if .UsedBy}}<span class="ok-text">{{t "storage.usedby" .UsedBy}}</span>{{else}}<span class="muted">{{t "storage.notused"}}</span>{{end}}</span>
-      <span>{{if not .UsedBy}}<form method="post" action="/storage/images/{{.ID}}/delete" class="inline-form compact">
-        <input class="input mono small" name="confirm" placeholder="{{.Short}}" aria-label="{{t "storage.confirm" .Short}}" autocomplete="off">
-        <button class="btn small danger" type="submit">{{t "storage.delete"}}</button></form>{{end}}</span>
-    </div>
-    {{else}}<p class="desc">{{t "storage.none"}}</p>{{end}}
-  </div>
-</section>
+<h2 class="section-title" id="images">{{template "icon-stack"}}{{t "storage.images"}} <span class="count">{{len $v.Disk.Images}}</span></h2>
+<div class="panel"><div class="table-scroll">
+<table class="dt store">
+  <colgroup><col><col class="c-size"><col class="c-age"><col class="c-use"><col class="c-del"></colgroup>
+  <thead><tr><th>{{t "storage.col.image"}}</th><th>{{t "storage.col.size"}}</th><th>{{t "storage.col.created"}}</th><th>{{t "storage.col.use"}}</th><th></th></tr></thead>
+  <tbody>
+  {{range $v.Disk.Images}}
+  <tr class="{{if not .UsedBy}}off{{end}}">
+    <td class="name"><span class="mono">{{range $i, $t := .Tags}}{{if $i}}, {{end}}{{$t}}{{else}}<span class="muted">{{t "storage.untagged"}}</span>{{end}}</span><span class="img">{{.Short}}</span></td>
+    <td class="num">{{bytes .Size}}</td>
+    <td class="muted">{{ago .Created}}</td>
+    <td>{{if .UsedBy}}<span class="badge ok">{{t "storage.usedby" .UsedBy}}</span>{{else}}<span class="badge muted">{{t "storage.notused"}}</span>{{end}}</td>
+    <td>{{if not .UsedBy}}<form method="post" action="/storage/images/{{.ID}}/delete" class="del-form">
+      <input class="input" name="confirm" placeholder="{{.Short}}" aria-label="{{t "storage.confirm" .Short}}" autocomplete="off">
+      <button class="btn tiny danger" type="submit">{{template "icon-trash"}}{{t "storage.delete"}}</button></form>{{end}}</td>
+  </tr>
+  {{else}}<tr><td colspan="5" class="empty-row">{{t "storage.none"}}</td></tr>{{end}}
+  </tbody>
+</table></div></div>
 
-<section class="section" id="volumes">
-  <h2>{{t "storage.volumes"}} <span class="count">{{len $v.Disk.Volumes}}</span></h2>
-  <div class="svc-table store-table">
-    {{range $v.Disk.Volumes}}
-    <div class="svc-row store-row">
-      <span><span class="mono">{{.Name}}</span>{{with .Project}}<br><small class="muted">{{t "containers.inproject" .}}</small>{{end}}</span>
-      <span>{{if .Size}}{{bytes .Size}}{{else}}—{{end}}</span>
-      <span></span>
-      <span>{{if .UsedBy}}<span class="ok-text">{{t "storage.usedby" .UsedBy}}</span>{{else}}<span class="muted">{{t "storage.notused"}}</span>{{end}}</span>
-      <span>{{if not .UsedBy}}<form method="post" action="/storage/volumes/{{.Name}}/delete" class="inline-form compact">
-        <input class="input mono small" name="confirm" placeholder="{{.Name}}" aria-label="{{t "storage.confirm" .Name}}" autocomplete="off">
-        <button class="btn small danger" type="submit">{{t "storage.delete"}}</button></form>{{end}}</span>
-    </div>
-    {{else}}<p class="desc">{{t "storage.none"}}</p>{{end}}
-  </div>
-</section>
-<p class="others-note">{{t "storage.note"}}</p>
+<h2 class="section-title" id="volumes">{{template "icon-stack"}}{{t "storage.volumes"}} <span class="count">{{len $v.Disk.Volumes}}</span></h2>
+<div class="panel"><div class="table-scroll">
+<table class="dt store">
+  <colgroup><col><col class="c-size"><col class="c-age"><col class="c-use"><col class="c-del"></colgroup>
+  <thead><tr><th>{{t "storage.col.volume"}}</th><th>{{t "storage.col.size"}}</th><th>{{t "storage.col.project"}}</th><th>{{t "storage.col.use"}}</th><th></th></tr></thead>
+  <tbody>
+  {{range $v.Disk.Volumes}}
+  <tr class="{{if not .UsedBy}}off{{end}}">
+    <td class="name"><span class="mono">{{.Name}}</span></td>
+    <td class="num">{{if .Size}}{{bytes .Size}}{{else}}<span class="muted">—</span>{{end}}</td>
+    <td class="muted">{{with .Project}}{{.}}{{else}}—{{end}}</td>
+    <td>{{if .UsedBy}}<span class="badge ok">{{t "storage.usedby" .UsedBy}}</span>{{else}}<span class="badge muted">{{t "storage.notused"}}</span>{{end}}</td>
+    <td>{{if not .UsedBy}}<form method="post" action="/storage/volumes/{{.Name}}/delete" class="del-form">
+      <input class="input" name="confirm" placeholder="{{.Name}}" aria-label="{{t "storage.confirm" .Name}}" autocomplete="off">
+      <button class="btn tiny danger" type="submit">{{template "icon-trash"}}{{t "storage.delete"}}</button></form>{{end}}</td>
+  </tr>
+  {{else}}<tr><td colspan="5" class="empty-row">{{t "storage.none"}}</td></tr>{{end}}
+  </tbody>
+</table></div></div>
+<p class="foot-note">{{t "storage.note"}}</p>
 {{end}}
 {{end}}
